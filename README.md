@@ -75,7 +75,7 @@ curl -sG "$BASE/" \
 
 ### Copy bridge (text → phone in one tap)
 
-Every code is a bridge code by default: instead of the raw text it encodes a short link back to this service (e.g. `https://qr.example.com/t?d=…`). Scanning it opens a minimal transfer page with an explicit choice: **📋 Copy all**, **🔗 Open link** (only when the payload looks like a URL), or **📤 Share** — the system share sheet, which pastes the text straight into any app (shown only where `navigator.share` is supported). Tapping any blank area of the page also copies, and an auto-copy attempt runs on load for environments that permit it. The choice belongs to whoever scans, not whoever generates — pass `mode=text` if you need the old direct encoding (e.g. for print longevity or offline use).
+Every code is a bridge code by default: instead of the raw text it encodes a short link back to this service (e.g. `https://qr.example.com/t?d=…`). Scanning it opens a minimal transfer page with an explicit choice: **📋 Copy all**, **🔗 Open link** (only when the payload looks like a URL), or **📤 Share** — the system share sheet, which pastes the text straight into any app (shown only where `navigator.share` is supported). Nothing is written to the clipboard until the user taps **Copy all** — no background or tap-anywhere copying. The choice belongs to whoever scans, not whoever generates — pass `mode=text` if you need the old direct encoding (e.g. for print longevity or offline use).
 
 - Data rides entirely in the URL (base64url, `deflate-raw` compressed whenever that is shorter) — the server decodes nothing and stores nothing.
 - The bridge URL is capped at 1 500 bytes; anything longer automatically falls back to a plain-text code.

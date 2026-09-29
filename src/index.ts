@@ -80,7 +80,7 @@ const LANDING_HTML = `<!doctype html>
 // 复制中转页:数据全部携带在 ?d= 参数里(base64url,z=1 表示 deflate-raw 压缩),
 // 服务器不解码、不存储。文本一律用 textContent 注入,杜绝 XSS。
 // 交互:扫码后立即给出三选一 —— 复制全文 / 打开链接(仅 URL) / 分享到其他应用
-// (系统分享面板,即"粘贴进 App");点页面空白处同样等于复制。
+// (系统分享面板,即"粘贴进 App")。剪贴板只在点击「复制全文」时写入,不做隐式复制。
 // 缓存只给 5 分钟:页面交互迭代频繁,避免手机浏览器长时间滞留旧版。
 const BRIDGE_HTML = `<!doctype html>
 <html lang="zh-CN">
@@ -140,29 +140,22 @@ const BRIDGE_HTML = `<!doctype html>
         });
       }
 
-      var HINT = '选择下方操作;点空白处也可复制';
+      var HINT = '选择下方操作';
 
-      function copyThen(after, ignoreFailure) {
+      function copyThen() {
         if (!navigator.clipboard || !navigator.clipboard.writeText) {
-          if (!ignoreFailure) status.textContent = '此浏览器不支持一键复制,请长按选择文本';
-          if (after) after();
+          status.textContent = '此浏览器不支持一键复制,请长按选择文本';
           return;
         }
         navigator.clipboard.writeText(current).then(function () {
           status.textContent = '已复制 ✓';
-          if (after) after();
         }, function () {
-          if (!ignoreFailure) status.textContent = '复制失败,请长按选择文本';
-          if (after) after();
+          status.textContent = '复制失败,请长按选择文本';
         });
       }
 
-      // 点页面空白处 = 复制;按钮各自 stopPropagation
-      document.addEventListener('click', function () {
-        copyThen(null, false);
-      });
-      copy.addEventListener('click', function (e) {
-        e.stopPropagation();
+      // 只有点击「复制全文」才写入剪贴板,不做任何隐式复制
+      copy.addEventListener('click', function () {
         copyThen(null, false);
       });
       share.addEventListener('click', function (e) {
@@ -170,11 +163,11 @@ const BRIDGE_HTML = `<!doctype html>
         var payload = { text: current };
         // 分享面板调不起来(部分 WebView 有 API 无实现)时,自动降级为复制
         function fallback() {
-          copyThen(null, false);
+          copyThen();
         }
         if (navigator.canShare && !navigator.canShare(payload)) {
           status.textContent = '此环境不支持分享,已为你复制';
-          copyThen(null, false);
+          copyThen();
           return;
         }
         status.textContent = '调起分享面板…';
@@ -202,10 +195,8 @@ const BRIDGE_HTML = `<!doctype html>
           open.hidden = false;
         }
         if (navigator.share) share.hidden = false;
-        status.textContent = '选择下方操作;点空白处也可复制';
+        status.textContent = HINT;
         body.hidden = false;
-        // 个别环境允许无手势复制,先静默试一次;失败保持提示不动
-        copyThen(null, true);
       }
 
       function fail() {
