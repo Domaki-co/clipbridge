@@ -9,8 +9,8 @@
 
 - **SVG output** — crisp at any resolution, returned as `image/svg+xml` with 1-day browser caching
 - **Styleable** — module pixel size, quiet-zone margin, foreground/background colors, error-correction level
-- **Built-in playground** — visiting the root URL without `?text=` serves a minimal form page with type hints and a copy-code toggle
-- **Copy bridge** — `mode=copy` turns text into a "scan to copy in one tap" transfer link; URLs keep their native open-on-scan behavior
+- **Built-in playground** — visiting the root URL without `?text=` serves a minimal form page
+- **Copy bridge by default** — every code encodes a short link to a transfer page where the scanner chooses to copy, open or share; `mode=text` encodes raw content instead
 - **Fault-tolerant** — out-of-range numbers are clamped, invalid colors fall back to defaults; bad input never causes a 500
 - **CORS-ready** — `Access-Control-Allow-Origin: *`, so the API can be embedded from any origin
 - **Stateless & free** — no database, KV or R2; runs comfortably inside the Workers free tier
@@ -43,7 +43,7 @@ GET /?text=...&size=...&margin=...&color=...&bg=...&ecl=...
 | `color` | `#RGB` / `#RRGGBB` / `#RRGGBBAA` | `#000000` | Foreground color |
 | `bg` | same formats | `#ffffff` | Background color |
 | `ecl` | `L` / `M` / `Q` / `H` | `M` | Error-correction level: higher survives more occlusion but holds less data |
-| `mode` | `copy` | — | Encode a bridge link to the transfer page instead of the raw text; see "Copy bridge" |
+| `mode` | `text` | bridge | `text` encodes the raw content directly; omit for the default bridge behavior (see "Copy bridge") |
 
 Responses:
 
@@ -75,7 +75,7 @@ curl -sG "$BASE/" \
 
 ### Copy bridge (text → phone in one tap)
 
-A plain-text code makes the phone display text that must be selected and copied by hand — three taps. `mode=copy` changes what goes into the code: instead of the raw text it encodes a short link back to this service (e.g. `https://qr.example.com/t?d=…`). Scanning it opens a minimal transfer page with an explicit choice: **📋 Copy all**, **🔗 Open link** (only when the payload looks like a URL), or **📤 Share** — the system share sheet, which pastes the text straight into any app (shown only where `navigator.share` is supported). Tapping any blank area of the page also copies, and an auto-copy attempt runs on load for environments that permit it.
+Every code is a bridge code by default: instead of the raw text it encodes a short link back to this service (e.g. `https://qr.example.com/t?d=…`). Scanning it opens a minimal transfer page with an explicit choice: **📋 Copy all**, **🔗 Open link** (only when the payload looks like a URL), or **📤 Share** — the system share sheet, which pastes the text straight into any app (shown only where `navigator.share` is supported). Tapping any blank area of the page also copies, and an auto-copy attempt runs on load for environments that permit it. The choice belongs to whoever scans, not whoever generates — pass `mode=text` if you need the old direct encoding (e.g. for print longevity or offline use).
 
 - Data rides entirely in the URL (base64url, `deflate-raw` compressed whenever that is shorter) — the server decodes nothing and stores nothing.
 - The bridge URL is capped at 1 500 bytes; anything longer automatically falls back to a plain-text code.

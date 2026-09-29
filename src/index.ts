@@ -46,7 +46,6 @@ const LANDING_HTML = `<!doctype html>
 <body>
   <h1>二维码生成器</h1>
   <p><input id="text" type="text" placeholder="输入网址或文本,回车生成" /></p>
-  <p><label><input type="checkbox" id="copymode" /> 复制码(扫码一键复制/打开)</label></p>
   <p id="hint"></p>
   <p><img id="qr" hidden alt="二维码预览" /></p>
   <code id="link"></code>
@@ -55,25 +54,21 @@ const LANDING_HTML = `<!doctype html>
     var img = document.getElementById('qr');
     var link = document.getElementById('link');
     var hint = document.getElementById('hint');
-    var copymode = document.getElementById('copymode');
 
+    // 所有码默认经中转页,复制还是打开由扫码的人自己选
     function hintFor(t) {
-      if (!t) return '';
-      if (copymode.checked) return '复制码:扫码打开中转页,一键复制或打开;内容过长会自动回退为普通码';
-      if (t.indexOf('http://') === 0 || t.indexOf('https://') === 0) return '普通码:扫码将直接打开链接';
-      return '普通码:扫码将显示文本,长按可复制';
+      return t ? '扫码后可选择:复制全文 / 打开链接 / 分享' : '';
     }
 
-    function refreshHint() { hint.textContent = hintFor(input.value.trim()); }
-    input.addEventListener('input', refreshHint);
-    copymode.addEventListener('change', refreshHint);
+    input.addEventListener('input', function () {
+      hint.textContent = hintFor(input.value.trim());
+    });
 
     input.addEventListener('change', function () {
       var t = input.value.trim();
       if (!t) return;
       var u = new URL('/', location);
       u.searchParams.set('text', t);
-      if (copymode.checked) u.searchParams.set('mode', 'copy');
       img.src = u.toString();
       img.hidden = false;
       link.textContent = u.toString();
@@ -307,10 +302,11 @@ export default {
       : 'M';
 
     try {
+      // 默认走中转页(复制/打开由扫码者自选);mode=text 显式要求直出原文
       const content =
-        (params.get('mode') ?? '').toLowerCase() === 'copy'
-          ? await bridgeContent(url.origin, text)
-          : text;
+        (params.get('mode') ?? '').toLowerCase() === 'text'
+          ? text
+          : await bridgeContent(url.origin, text);
       const svg = renderSVG(content, {
         ecc,
         pixelSize: clampInt(params.get('size'), 1, 20, 8),
