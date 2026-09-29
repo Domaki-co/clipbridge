@@ -9,7 +9,8 @@
 
 - **SVG output** — crisp at any resolution, returned as `image/svg+xml` with 1-day browser caching
 - **Styleable** — module pixel size, quiet-zone margin, foreground/background colors, error-correction level
-- **Built-in playground** — visiting the root URL without `?text=` serves a minimal form page
+- **Built-in playground** — visiting the root URL without `?text=` serves a minimal form page with type hints and a copy-code toggle
+- **Copy bridge** — `mode=copy` turns text into a "scan to copy in one tap" transfer link; URLs keep their native open-on-scan behavior
 - **Fault-tolerant** — out-of-range numbers are clamped, invalid colors fall back to defaults; bad input never causes a 500
 - **CORS-ready** — `Access-Control-Allow-Origin: *`, so the API can be embedded from any origin
 - **Stateless & free** — no database, KV or R2; runs comfortably inside the Workers free tier
@@ -42,6 +43,7 @@ GET /?text=...&size=...&margin=...&color=...&bg=...&ecl=...
 | `color` | `#RGB` / `#RRGGBB` / `#RRGGBBAA` | `#000000` | Foreground color |
 | `bg` | same formats | `#ffffff` | Background color |
 | `ecl` | `L` / `M` / `Q` / `H` | `M` | Error-correction level: higher survives more occlusion but holds less data |
+| `mode` | `copy` | — | Encode a bridge link to the transfer page instead of the raw text; see "Copy bridge" |
 
 Responses:
 
@@ -70,6 +72,14 @@ curl -sG "$BASE/" \
   --data-urlencode "text=https://example.com" \
   --data-urlencode "size=12" --data-urlencode "color=#4A90D9" -o styled.svg
 ```
+
+### Copy bridge (text → phone in one tap)
+
+A plain-text code makes the phone display text that must be selected and copied by hand — three taps. `mode=copy` changes what goes into the code: instead of the raw text it encodes a short link back to this service (e.g. `https://qr.example.com/t?d=…`). Scanning it opens a minimal transfer page with a big **Copy all** button; when the payload looks like a URL, an **Open link** button appears alongside.
+
+- Data rides entirely in the URL (base64url, `deflate-raw` compressed whenever that is shorter) — the server decodes nothing and stores nothing.
+- The bridge URL is capped at 1 500 bytes; anything longer automatically falls back to a plain-text code.
+- Caveats: the payload is visible to anyone holding the link and ends up in browser history — don't bridge secrets. The clipboard API requires a user gesture and a secure context (HTTPS), so the page offers a big button rather than relying on auto-copy.
 
 ### Handy payload formats
 
@@ -106,7 +116,7 @@ BEGIN:VCARD%0AVERSION:3.0%0AFN:Jane%0ATEL:+8613800000000%0AEND:VCARD
 
 ```text
 qr-generator/
-├── src/index.ts      # the entire service: parse params → uqr renderSVG → respond
+├── src/index.ts      # the entire service: parse params → uqr renderSVG / bridge page → respond
 ├── wrangler.jsonc    # Worker configuration
 ├── package.json
 ├── tsconfig.json

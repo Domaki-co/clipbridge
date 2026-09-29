@@ -9,7 +9,8 @@
 
 - **SVG 输出** — 任意分辨率都清晰,`image/svg+xml` 响应,浏览器缓存 1 天
 - **样式可调** — 模块像素尺寸、四周留白、前景/背景色、纠错等级
-- **内置使用页** — 不带 `?text=` 访问根路径时,返回一个极简表单页,输入即出码
+- **内置使用页** — 不带 `?text=` 访问根路径时,返回一个极简表单页:输入实时提示扫码效果,可勾选「复制码」
+- **复制码** — `mode=copy` 把文本变成「扫码一键复制」的中转短链;URL 则保留原生「扫码直接打开」
 - **容错友好** — 越界数值自动夹取、非法颜色回退默认值,坏参数不会引发 500
 - **CORS 全开** — `Access-Control-Allow-Origin: *`,任何来源都可嵌入调用
 - **无状态 & 免费** — 不依赖数据库 / KV / R2,轻松运行在 Workers 免费额度内
@@ -42,6 +43,7 @@ GET /?text=...&size=...&margin=...&color=...&bg=...&ecl=...
 | `color` | `#RGB` / `#RRGGBB` / `#RRGGBBAA` | `#000000` | 前景色 |
 | `bg` | 同上 | `#ffffff` | 背景色 |
 | `ecl` | `L` / `M` / `Q` / `H` | `M` | 纠错等级:越高越抗遮挡,但容量越小 |
+| `mode` | `copy` | — | 编码指向中转页的桥接链接,替代原文;见下文「复制码」 |
 
 响应约定:
 
@@ -70,6 +72,14 @@ curl -sG "$BASE/" \
   --data-urlencode "text=https://example.com" \
   --data-urlencode "size=12" --data-urlencode "color=#4A90D9" -o styled.svg
 ```
+
+### 复制码(文本一键传到手机)
+
+普通文本码扫出来还要长按→全选→复制,三步。`mode=copy` 改变码里的内容:不再编码原文,而是编码一个指回本服务的短链接(如 `https://qr.example.com/t?d=…`)。扫码打开一个极简中转页,大按钮「复制全文」一点,文本进手机剪贴板;内容像 URL 时,旁边还会出现「打开链接」按钮。
+
+- 数据全部自携带在 URL 里(base64url;deflate-raw 压缩后更短时用压缩),服务器不解码、不存储任何东西。
+- 桥接 URL 上限 1500 字节,超出自动回退为普通文本码。
+- 注意:内容对任何拿到链接的人可见,且会进浏览器历史——别传密码;剪贴板 API 需要用户点一下且要求安全上下文(HTTPS),所以页面用「大按钮」而非打开即自动复制。
 
 ### 常用内容格式
 
@@ -106,7 +116,7 @@ BEGIN:VCARD%0AVERSION:3.0%0AFN:张三%0ATEL:+8613800000000%0AEND:VCARD
 
 ```text
 qr-generator/
-├── src/index.ts      # 全部逻辑:解析参数 → uqr renderSVG → 返回响应
+├── src/index.ts      # 全部逻辑:解析参数 → uqr renderSVG / 中转页 → 返回响应
 ├── wrangler.jsonc    # Worker 配置
 ├── package.json
 ├── tsconfig.json
