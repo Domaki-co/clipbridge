@@ -75,11 +75,11 @@ curl -sG "$BASE/" \
 
 ### Copy bridge (text → phone in one tap)
 
-A plain-text code makes the phone display text that must be selected and copied by hand — three taps. `mode=copy` changes what goes into the code: instead of the raw text it encodes a short link back to this service (e.g. `https://qr.example.com/t?d=…`). Scanning it opens a minimal transfer page with a big **Copy all** button; when the payload looks like a URL, an **Open link** button appears alongside.
+A plain-text code makes the phone display text that must be selected and copied by hand — three taps. `mode=copy` changes what goes into the code: instead of the raw text it encodes a short link back to this service (e.g. `https://qr.example.com/t?d=…`). Scanning it opens a minimal transfer page with an explicit choice: **📋 Copy all** or **🔗 Open link** (the latter only when the payload looks like a URL). Tapping any blank area of the page also copies, and an auto-copy attempt runs on load for environments that permit it.
 
 - Data rides entirely in the URL (base64url, `deflate-raw` compressed whenever that is shorter) — the server decodes nothing and stores nothing.
 - The bridge URL is capped at 1 500 bytes; anything longer automatically falls back to a plain-text code.
-- Caveats: the payload is visible to anyone holding the link and ends up in browser history — don't bridge secrets. The clipboard API requires a user gesture and a secure context (HTTPS), so the page offers a big button rather than relying on auto-copy.
+- Caveats: the payload is visible to anyone holding the link and ends up in browser history — don't bridge secrets. The clipboard API requires a user gesture and a secure context (HTTPS), hence the explicit buttons plus a silent auto-copy attempt.
 
 ### Handy payload formats
 

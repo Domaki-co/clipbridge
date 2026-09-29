@@ -8,6 +8,21 @@ interface Env {}
 
 const ECC_LEVELS = ['L', 'M', 'Q', 'H'] as const;
 
+// 站点图标:深色圆角底 + 三个二维码定位角 + 蓝色数据点,矢量单文件
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#15181d"/>
+  <rect x="9" y="9" width="20" height="20" rx="5" fill="#ffffff"/>
+  <rect x="14" y="14" width="10" height="10" rx="2.5" fill="#15181d"/>
+  <rect x="35" y="9" width="20" height="20" rx="5" fill="#ffffff"/>
+  <rect x="40" y="14" width="10" height="10" rx="2.5" fill="#15181d"/>
+  <rect x="9" y="35" width="20" height="20" rx="5" fill="#ffffff"/>
+  <rect x="14" y="40" width="10" height="10" rx="2.5" fill="#15181d"/>
+  <rect x="35" y="35" width="9" height="9" rx="2" fill="#4a90d9"/>
+  <rect x="46" y="35" width="9" height="9" rx="2" fill="#ffffff"/>
+  <rect x="35" y="46" width="9" height="9" rx="2" fill="#ffffff"/>
+  <rect x="46" y="46" width="9" height="9" rx="2" fill="#4a90d9"/>
+</svg>`;
+
 // 复制码:桥接 URL 的字节预算。二维码 V25@纠错M 约可容纳 1591 字节,
 // 预算内保证扫得出;超出预算的请求回退为普通文本码。
 const BRIDGE_URL_MAX_BYTES = 1500;
@@ -18,6 +33,7 @@ const LANDING_HTML = `<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>二维码生成器</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
     body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; padding: 0 1rem; text-align: center; color: #111; }
     input[type="text"] { width: 100%; padding: .6rem; font-size: 1rem; box-sizing: border-box; }
@@ -68,31 +84,43 @@ const LANDING_HTML = `<!doctype html>
 
 // 复制中转页:数据全部携带在 ?d= 参数里(base64url,z=1 表示 deflate-raw 压缩),
 // 服务器不解码、不存储。文本一律用 textContent 注入,杜绝 XSS。
-// 交互:点页面任意位置 = 复制(浏览器要求剪贴板写入必须发生在用户手势内,
-// 无法做到零点击复制);内容为 URL 时点内容本身 = 复制后立即跳转。
+// 交互:扫码后给出明确二选一 —— 「复制全文」/「打开链接」(仅 URL 内容显示);
+// 点页面空白处同样等于复制(浏览器要求剪贴板写入必须发生在用户手势内)。
 const BRIDGE_HTML = `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>复制到手机</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
-    html, body { height: 100%; }
-    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 0 auto; padding: 3rem 1rem; box-sizing: border-box; color: #111; text-align: center; cursor: pointer; -webkit-tap-highlight-color: rgba(0,0,0,.06); }
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 0 auto; padding: 3rem 1rem; box-sizing: border-box; color: #111; text-align: center; -webkit-tap-highlight-color: rgba(0,0,0,.06); }
     #status { min-height: 1.4em; font-size: .85rem; color: #888; }
-    .content { display: block; margin-top: 1rem; white-space: pre-wrap; word-break: break-all; text-align: left; background: #f6f6f6; border-radius: 12px; padding: 1.2rem; font-size: 1rem; line-height: 1.5; max-height: 45vh; overflow: auto; }
-    a.content { background: #eaf3fc; color: #1668b8; font-weight: 600; text-decoration: underline; }
+    .content { display: block; margin-top: 1rem; white-space: pre-wrap; word-break: break-all; text-align: left; background: #f6f6f6; border-radius: 12px; padding: 1.2rem; font-size: 1rem; line-height: 1.5; max-height: 40vh; overflow: auto; }
+    .actions { display: flex; gap: .75rem; margin-top: 1.2rem; }
+    .btn { flex: 1; display: flex; align-items: center; justify-content: center; padding: .95rem 0; font-size: 1.05rem; border-radius: 10px; border: 0; cursor: pointer; }
+    .btn.primary { background: #15181d; color: #fff; }
+    a.btn.blue { background: #4a90d9; color: #fff; text-decoration: none; }
     footer { margin-top: 2rem; font-size: .75rem; color: #999; }
   </style>
 </head>
 <body>
   <p id="status">解码中…</p>
-  <div id="body" hidden></div>
+  <div id="body" hidden>
+    <div id="content" class="content"></div>
+    <div class="actions">
+      <button id="copy" class="btn primary" type="button">📋 复制全文</button>
+      <a id="open" class="btn blue" hidden rel="noopener">🔗 打开链接</a>
+    </div>
+  </div>
   <footer>内容随二维码携带,本服务不留存、无统计。</footer>
   <script>
     (function () {
       var status = document.getElementById('status');
       var body = document.getElementById('body');
+      var content = document.getElementById('content');
+      var copy = document.getElementById('copy');
+      var open = document.getElementById('open');
       var q = new URLSearchParams(location.search);
       var d = q.get('d');
       var current = '';
@@ -128,34 +156,24 @@ const BRIDGE_HTML = `<!doctype html>
         });
       }
 
-      // 点页面任意位置 = 复制
+      // 点页面空白处 = 复制;两个按钮各自 stopPropagation
       document.addEventListener('click', function () {
+        copyThen(null, false);
+      });
+      copy.addEventListener('click', function (e) {
+        e.stopPropagation();
         copyThen(null, false);
       });
 
       function show(text) {
         current = text;
-        var t = text.trim();
-        var lower = t.toLowerCase();
-        var el;
-        if (lower.indexOf('http://') === 0 || lower.indexOf('https://') === 0) {
-          status.textContent = '点任意位置复制;点链接直接打开';
-          el = document.createElement('a');
-          el.href = t;
-          el.rel = 'noopener';
-          // 点链接本身 = 复制并立即跳转
-          el.addEventListener('click', function (e) {
-            e.stopPropagation();
-            e.preventDefault();
-            copyThen(function () { location.assign(t); }, false);
-          });
-        } else {
-          status.textContent = '点按任意位置复制';
-          el = document.createElement('div');
+        content.textContent = text;
+        var t = text.trim().toLowerCase();
+        if (t.indexOf('http://') === 0 || t.indexOf('https://') === 0) {
+          open.href = text.trim();
+          open.hidden = false;
         }
-        el.className = 'content';
-        el.textContent = text;
-        body.appendChild(el);
+        status.textContent = '选择:复制,或打开链接';
         body.hidden = false;
         // 个别环境允许无手势复制,先静默试一次;失败保持提示不动
         copyThen(null, true);
@@ -234,6 +252,16 @@ export default {
   async fetch(request, _env, ctx): Promise<Response> {
     const url = new URL(request.url);
     const params = url.searchParams;
+
+    // 站点图标
+    if (url.pathname === '/favicon.svg') {
+      return new Response(FAVICON_SVG, {
+        headers: {
+          'content-type': 'image/svg+xml; charset=utf-8',
+          'cache-control': 'public, max-age=604800',
+        },
+      });
+    }
 
     // 复制中转页:扫码侧落地,内容自携带于查询参数
     if (url.pathname === '/t') {
