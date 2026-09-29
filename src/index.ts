@@ -68,6 +68,8 @@ const LANDING_HTML = `<!doctype html>
 
 // 复制中转页:数据全部携带在 ?d= 参数里(base64url,z=1 表示 deflate-raw 压缩),
 // 服务器不解码、不存储。文本一律用 textContent 注入,杜绝 XSS。
+// 交互:点页面任意位置 = 复制(浏览器要求剪贴板写入必须发生在用户手势内,
+// 无法做到零点击复制);内容为 URL 时点内容本身 = 复制后立即跳转。
 const BRIDGE_HTML = `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -75,29 +77,25 @@ const BRIDGE_HTML = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>复制到手机</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; padding: 0 1rem; text-align: center; color: #111; }
-    #content { white-space: pre-wrap; word-break: break-all; text-align: left; background: #f6f6f6; border-radius: 8px; padding: 1rem; font-size: .95rem; max-height: 40vh; overflow: auto; }
-    .btn { display: block; margin: 1rem auto 0; padding: .9rem 2rem; font-size: 1.1rem; border-radius: 8px; border: 0; background: #111; color: #fff; text-decoration: none; max-width: 280px; }
-    a.btn { background: #4A90D9; }
+    html, body { height: 100%; }
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 0 auto; padding: 3rem 1rem; box-sizing: border-box; color: #111; text-align: center; cursor: pointer; -webkit-tap-highlight-color: rgba(0,0,0,.06); }
+    #status { min-height: 1.4em; font-size: .85rem; color: #888; }
+    .content { display: block; margin-top: 1rem; white-space: pre-wrap; word-break: break-all; text-align: left; background: #f6f6f6; border-radius: 12px; padding: 1.2rem; font-size: 1rem; line-height: 1.5; max-height: 45vh; overflow: auto; }
+    a.content { background: #eaf3fc; color: #1668b8; font-weight: 600; text-decoration: underline; }
     footer { margin-top: 2rem; font-size: .75rem; color: #999; }
-    #status { color: #666; }
   </style>
 </head>
 <body>
-  <h1>复制到手机</h1>
   <p id="status">解码中…</p>
-  <p id="content" hidden></p>
-  <button id="copy" class="btn" hidden>复制全文</button>
-  <a id="open" class="btn" hidden rel="noopener">打开链接</a>
+  <div id="body" hidden></div>
   <footer>内容随二维码携带,本服务不留存、无统计。</footer>
   <script>
     (function () {
       var status = document.getElementById('status');
-      var content = document.getElementById('content');
-      var copy = document.getElementById('copy');
-      var open = document.getElementById('open');
+      var body = document.getElementById('body');
       var q = new URLSearchParams(location.search);
       var d = q.get('d');
+      var current = '';
 
       function bytesFromB64Url(s) {
         s = s.replace(/-/g, '+').replace(/_/g, '/');
@@ -115,39 +113,57 @@ const BRIDGE_HTML = `<!doctype html>
         });
       }
 
+      function copyThen(after, ignoreFailure) {
+        if (!navigator.clipboard || !navigator.clipboard.writeText) {
+          if (!ignoreFailure) status.textContent = '此浏览器不支持一键复制,请长按选择文本';
+          if (after) after();
+          return;
+        }
+        navigator.clipboard.writeText(current).then(function () {
+          status.textContent = '已复制 ✓';
+          if (after) after();
+        }, function () {
+          if (!ignoreFailure) status.textContent = '复制失败,请长按选择文本';
+          if (after) after();
+        });
+      }
+
+      // 点页面任意位置 = 复制
+      document.addEventListener('click', function () {
+        copyThen(null, false);
+      });
+
       function show(text) {
-        status.hidden = true;
-        content.textContent = text;
-        content.hidden = false;
-        copy.hidden = false;
-        var t = text.trim().toLowerCase();
-        if (t.indexOf('http://') === 0 || t.indexOf('https://') === 0) {
-          open.href = text.trim();
-          open.hidden = false;
+        current = text;
+        var t = text.trim();
+        var lower = t.toLowerCase();
+        var el;
+        if (lower.indexOf('http://') === 0 || lower.indexOf('https://') === 0) {
+          status.textContent = '点任意位置复制;点链接直接打开';
+          el = document.createElement('a');
+          el.href = t;
+          el.rel = 'noopener';
+          // 点链接本身 = 复制并立即跳转
+          el.addEventListener('click', function (e) {
+            e.stopPropagation();
+            e.preventDefault();
+            copyThen(function () { location.assign(t); }, false);
+          });
+        } else {
+          status.textContent = '点按任意位置复制';
+          el = document.createElement('div');
         }
-        // 多数浏览器要求用户手势,失败则静默交给按钮
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(text).then(function () {
-            copy.textContent = '已复制 ✓';
-          }, function () {});
-        }
+        el.className = 'content';
+        el.textContent = text;
+        body.appendChild(el);
+        body.hidden = false;
+        // 个别环境允许无手势复制,先静默试一次;失败保持提示不动
+        copyThen(null, true);
       }
 
       function fail() {
         status.textContent = '内容无效或已损坏';
       }
-
-      copy.addEventListener('click', function () {
-        if (!navigator.clipboard || !navigator.clipboard.writeText) {
-          copy.textContent = '此浏览器不支持一键复制,请长按选择文本';
-          return;
-        }
-        navigator.clipboard.writeText(content.textContent || '').then(function () {
-          copy.textContent = '已复制 ✓';
-        }, function () {
-          copy.textContent = '复制失败,请长按选择文本';
-        });
-      });
 
       try {
         var bytes = bytesFromB64Url(d);
