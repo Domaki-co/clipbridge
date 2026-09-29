@@ -140,6 +140,8 @@ const BRIDGE_HTML = `<!doctype html>
         });
       }
 
+      var HINT = '选择下方操作;点空白处也可复制';
+
       function copyThen(after, ignoreFailure) {
         if (!navigator.clipboard || !navigator.clipboard.writeText) {
           if (!ignoreFailure) status.textContent = '此浏览器不支持一键复制,请长按选择文本';
@@ -165,10 +167,30 @@ const BRIDGE_HTML = `<!doctype html>
       });
       share.addEventListener('click', function (e) {
         e.stopPropagation();
-        // 系统分享面板:可直接粘贴进微信、备忘录等任意 App
-        navigator.share({ text: current }).then(function () {
-          status.textContent = '已分享 ✓';
-        }, function () {});
+        var payload = { text: current };
+        // 分享面板调不起来(部分 WebView 有 API 无实现)时,自动降级为复制
+        function fallback() {
+          copyThen(null, false);
+        }
+        if (navigator.canShare && !navigator.canShare(payload)) {
+          status.textContent = '此环境不支持分享,已为你复制';
+          copyThen(null, false);
+          return;
+        }
+        status.textContent = '调起分享面板…';
+        try {
+          navigator.share(payload).then(function () {
+            status.textContent = '已分享 ✓';
+          }, function (err) {
+            if (err && err.name === 'AbortError') { // 用户关闭面板,不算错误
+              status.textContent = HINT;
+              return;
+            }
+            fallback();
+          });
+        } catch (err) {
+          fallback();
+        }
       });
 
       function show(text) {
