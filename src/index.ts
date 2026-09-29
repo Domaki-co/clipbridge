@@ -84,8 +84,9 @@ const LANDING_HTML = `<!doctype html>
 
 // 复制中转页:数据全部携带在 ?d= 参数里(base64url,z=1 表示 deflate-raw 压缩),
 // 服务器不解码、不存储。文本一律用 textContent 注入,杜绝 XSS。
-// 交互:扫码后给出明确二选一 —— 「复制全文」/「打开链接」(仅 URL 内容显示);
-// 点页面空白处同样等于复制(浏览器要求剪贴板写入必须发生在用户手势内)。
+// 交互:扫码后立即给出三选一 —— 复制全文 / 打开链接(仅 URL) / 分享到其他应用
+// (系统分享面板,即"粘贴进 App");点页面空白处同样等于复制。
+// 缓存只给 5 分钟:页面交互迭代频繁,避免手机浏览器长时间滞留旧版。
 const BRIDGE_HTML = `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -96,11 +97,12 @@ const BRIDGE_HTML = `<!doctype html>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 420px; margin: 0 auto; padding: 3rem 1rem; box-sizing: border-box; color: #111; text-align: center; -webkit-tap-highlight-color: rgba(0,0,0,.06); }
     #status { min-height: 1.4em; font-size: .85rem; color: #888; }
-    .content { display: block; margin-top: 1rem; white-space: pre-wrap; word-break: break-all; text-align: left; background: #f6f6f6; border-radius: 12px; padding: 1.2rem; font-size: 1rem; line-height: 1.5; max-height: 40vh; overflow: auto; }
-    .actions { display: flex; gap: .75rem; margin-top: 1.2rem; }
+    .content { display: block; margin-top: 1rem; white-space: pre-wrap; word-break: break-all; text-align: left; background: #f6f6f6; border-radius: 12px; padding: 1.2rem; font-size: 1rem; line-height: 1.5; max-height: 32vh; overflow: auto; }
+    .actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.2rem; }
     .btn { flex: 1; display: flex; align-items: center; justify-content: center; padding: .95rem 0; font-size: 1.05rem; border-radius: 10px; border: 0; cursor: pointer; }
     .btn.primary { background: #15181d; color: #fff; }
     a.btn.blue { background: #4a90d9; color: #fff; text-decoration: none; }
+    .btn.plain { background: #eef0f3; color: #333; }
     footer { margin-top: 2rem; font-size: .75rem; color: #999; }
   </style>
 </head>
@@ -111,6 +113,7 @@ const BRIDGE_HTML = `<!doctype html>
     <div class="actions">
       <button id="copy" class="btn primary" type="button">📋 复制全文</button>
       <a id="open" class="btn blue" hidden rel="noopener">🔗 打开链接</a>
+      <button id="share" class="btn plain" type="button" hidden>📤 分享 / 粘贴到其他应用</button>
     </div>
   </div>
   <footer>内容随二维码携带,本服务不留存、无统计。</footer>
@@ -121,6 +124,7 @@ const BRIDGE_HTML = `<!doctype html>
       var content = document.getElementById('content');
       var copy = document.getElementById('copy');
       var open = document.getElementById('open');
+      var share = document.getElementById('share');
       var q = new URLSearchParams(location.search);
       var d = q.get('d');
       var current = '';
@@ -156,13 +160,20 @@ const BRIDGE_HTML = `<!doctype html>
         });
       }
 
-      // 点页面空白处 = 复制;两个按钮各自 stopPropagation
+      // 点页面空白处 = 复制;按钮各自 stopPropagation
       document.addEventListener('click', function () {
         copyThen(null, false);
       });
       copy.addEventListener('click', function (e) {
         e.stopPropagation();
         copyThen(null, false);
+      });
+      share.addEventListener('click', function (e) {
+        e.stopPropagation();
+        // 系统分享面板:可直接粘贴进微信、备忘录等任意 App
+        navigator.share({ text: current }).then(function () {
+          status.textContent = '已分享 ✓';
+        }, function () {});
       });
 
       function show(text) {
@@ -173,7 +184,8 @@ const BRIDGE_HTML = `<!doctype html>
           open.href = text.trim();
           open.hidden = false;
         }
-        status.textContent = '选择:复制,或打开链接';
+        if (navigator.share) share.hidden = false;
+        status.textContent = '选择下方操作;点空白处也可复制';
         body.hidden = false;
         // 个别环境允许无手势复制,先静默试一次;失败保持提示不动
         copyThen(null, true);
@@ -268,7 +280,7 @@ export default {
       return new Response(BRIDGE_HTML, {
         headers: {
           'content-type': 'text/html; charset=utf-8',
-          'cache-control': 'public, max-age=86400',
+          'cache-control': 'public, max-age=300',
         },
       });
     }
