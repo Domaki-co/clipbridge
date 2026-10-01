@@ -43,27 +43,41 @@ const LANDING_HTML = `<!doctype html>
   <title>二维码生成器</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; padding: 0 1rem; text-align: center; color: #111; }
-    input[type="text"] { width: 100%; padding: .6rem; font-size: 1rem; box-sizing: border-box; }
-    label { font-size: .85rem; color: #444; }
-    #hint { min-height: 1.2em; font-size: .8rem; color: #888; }
-    img { margin-top: 1.5rem; max-width: 100%; background: #fff; border: 1px solid #eee; }
-    code { display: block; margin-top: .5rem; font-size: .8rem; color: #666; word-break: break-all; }
-    .nav { margin-top: 1.6rem; }
-    .nav a { font-size: .85rem; color: #888; }
-    .claimbox { margin-top: .6rem; font-size: .9rem; color: #444; }
-    .claimbox input { width: 6.5em; text-align: center; text-transform: uppercase; font-family: ui-monospace, monospace; letter-spacing: .2em; padding: .35rem; font-size: 1rem; border: 1px solid #ddd; border-radius: 8px; }
-    .claimbox button { padding: .38rem 1rem; margin-left: .3rem; border: 0; border-radius: 8px; background: #15181d; color: #fff; cursor: pointer; font-size: .95rem; }
+    [hidden] { display: none !important; }
+    body { font-family: system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; margin: 0; padding: 2.5rem 1rem 3rem; color: #171a20; text-align: center; background-color: #f4f6fa; background-image: radial-gradient(720px 320px at 50% -60px, rgba(74,144,217,.16), rgba(74,144,217,0)); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .card { max-width: 430px; margin: 0 auto; background: #fff; border: 1px solid #e9edf4; border-radius: 20px; padding: 1.4rem 1.3rem 1.2rem; box-shadow: 0 12px 40px rgba(23,26,32,.07); }
+    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+    .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
+    .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
+    .title { font-size: 1.25rem; margin: .1rem 0 .2rem; }
+    .sub { margin: 0 0 1.1rem; font-size: .85rem; color: #7a8190; }
+    p { margin: .6rem 0 0; }
+    input[type="text"] { width: 100%; padding: .85rem 1rem; font-size: 1rem; box-sizing: border-box; border: 1px solid #dfe5ee; border-radius: 12px; background: #f8fafd; }
+    input[type="text"]:focus { outline: none; border-color: #4a90d9; background: #fff; box-shadow: 0 0 0 3px rgba(74,144,217,.15); }
+    #hint { min-height: 1.2em; margin: .55rem 0 0; font-size: .8rem; color: #8a93a3; }
+    #qr { margin-top: 1.1rem; width: 240px; max-width: 100%; background: #fff; border: 1px solid #eef1f6; border-radius: 14px; padding: 10px; box-sizing: border-box; box-shadow: 0 8px 24px rgba(23,26,32,.08); }
+    code { display: block; margin-top: .7rem; font-size: .78rem; color: #667085; word-break: break-all; }
+    .nav { margin-top: 1.3rem; }
+    .nav a { font-size: .85rem; color: #667085; }
+    .claimbox { margin-top: .9rem; font-size: .9rem; color: #444; }
+    .claimbox input { width: 6.5em; text-align: center; text-transform: uppercase; font-family: ui-monospace, monospace; letter-spacing: .2em; padding: .4rem; font-size: 1rem; border: 1px solid #dfe5ee; border-radius: 10px; }
+    .claimbox input:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 3px rgba(74,144,217,.15); }
+    .claimbox button { padding: .42rem 1.1rem; margin-left: .3rem; border: 0; border-radius: 10px; background: #15181d; color: #fff; cursor: pointer; font-size: .95rem; }
+    .claimbox button:active { transform: scale(.97); }
   </style>
 </head>
 <body>
-  <h1>二维码生成器</h1>
-  <p><input id="text" type="text" placeholder="输入网址或文本,回车生成" /></p>
-  <p id="hint"></p>
-  <p><img id="qr" hidden alt="二维码预览" /></p>
-  <code id="link"></code>
-  <p class="claimbox">收到取件码?<input id="claim" placeholder="如 K7X2" maxlength="4" autocomplete="off" /><button id="claimgo" type="button">取件</button></p>
-  <p class="nav"><a href="/send">反向传输?用取件码把文本传到电脑 →</a></p>
+  <main class="card">
+    <div class="top"><span class="brand"><img src="/favicon.svg" alt="" />二维码生成器</span></div>
+    <h1 class="title">网址 / 文本 → 二维码</h1>
+    <p class="sub">默认生成复制码,扫码后由对方选择复制或打开</p>
+    <p><input id="text" type="text" placeholder="输入网址或文本,回车生成" /></p>
+    <p id="hint"></p>
+    <p><img id="qr" hidden alt="二维码预览" /></p>
+    <code id="link"></code>
+    <p class="claimbox">收到取件码?<input id="claim" placeholder="如 K7X2" maxlength="4" autocomplete="off" /><button id="claimgo" type="button">取件</button></p>
+    <p class="nav"><a href="/send">反向传输?用取件码把文本传到电脑 →</a></p>
+  </main>
   <script>
     var input = document.getElementById('text');
     var img = document.getElementById('qr');
@@ -129,28 +143,48 @@ const BRIDGE_HTML_TEMPLATE = `<!doctype html>
   <title>复制到手机</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 0 auto; padding: 3rem 1rem; box-sizing: border-box; color: #111; text-align: center; -webkit-tap-highlight-color: rgba(0,0,0,.06); }
-    #status { min-height: 1.4em; font-size: .85rem; color: #888; }
-    .content { display: block; margin-top: 1rem; white-space: pre-wrap; word-break: break-all; text-align: left; background: #f6f6f6; border-radius: 12px; padding: 1.2rem; font-size: 1rem; line-height: 1.5; max-height: 32vh; overflow: auto; }
-    .actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.2rem; }
-    .btn { flex: 1; display: flex; align-items: center; justify-content: center; padding: .95rem 0; font-size: 1.05rem; border-radius: 10px; border: 0; cursor: pointer; }
-    .btn.primary { background: #15181d; color: #fff; }
-    a.btn.blue { background: #4a90d9; color: #fff; text-decoration: none; }
-    .btn.plain { background: #eef0f3; color: #333; }
-    footer { margin-top: 2rem; font-size: .75rem; color: #999; }
+    [hidden] { display: none !important; }
+    body { font-family: system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; margin: 0; padding: 2.5rem 1rem 3rem; color: #171a20; text-align: center; background-color: #f4f6fa; background-image: radial-gradient(720px 320px at 50% -60px, rgba(74,144,217,.16), rgba(74,144,217,0)); min-height: 100vh; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: rgba(0,0,0,.06); }
+    .card { max-width: 430px; margin: 0 auto; background: #fff; border: 1px solid #e9edf4; border-radius: 20px; padding: 1.4rem 1.3rem 1.2rem; box-shadow: 0 12px 40px rgba(23,26,32,.07); }
+    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+    .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
+    .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
+    .home { font-size: .82rem; color: #667085; text-decoration: none; padding: .32rem .75rem; border-radius: 999px; background: #f1f4f9; }
+    .home:hover { background: #e7ecf4; color: #171a20; }
+    p { margin: .45rem 0 0; }
+    .status { display: inline-block; padding: .32rem .95rem; border-radius: 999px; background: #f1f4f9; color: #667085; font-size: .82rem; }
+    .status.ok { background: #e6f6ee; color: #147a4d; }
+    .status.err { background: #fdeeee; color: #b03a2e; }
+    .content { text-align: left; white-space: pre-wrap; word-break: break-all; background: #f7f9fc; border: 1px solid #eef1f6; border-radius: 12px; padding: 1rem 1.1rem; font-size: .98rem; line-height: 1.55; max-height: 32vh; overflow: auto; }
+    .actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.1rem; }
+    .btn { display: flex; align-items: center; justify-content: center; gap: .45rem; width: 100%; padding: .95rem 0; font-size: 1.02rem; font-weight: 600; border-radius: 12px; border: 0; cursor: pointer; text-decoration: none; transition: transform .06s ease, filter .15s ease; }
+    .btn:active { transform: scale(.985); }
+    .btn.primary { background: linear-gradient(180deg, #23272f, #15181d); color: #fff; box-shadow: 0 6px 16px rgba(21,24,29,.22); }
+    .btn.primary:hover { filter: brightness(1.15); }
+    a.btn.blue { background: linear-gradient(180deg, #57a0f5, #3d7ef0); color: #fff; box-shadow: 0 6px 16px rgba(61,126,240,.28); }
+    a.btn.blue:hover { filter: brightness(1.06); }
+    .btn.plain { background: #fff; border: 1px solid #dfe5ee; color: #333; }
+    .btn.plain:hover { background: #f6f8fc; }
+    .note { margin: 1.2rem 0 0; font-size: .75rem; color: #98a1b0; }
   </style>
 </head>
 <body>
-  <p id="status">解码中…</p>
-  <div id="body" hidden>
-    <div id="content" class="content"></div>
-    <div class="actions">
-      <button id="copy" class="btn primary" type="button">📋 复制全文</button>
-      <a id="open" class="btn blue" hidden rel="noopener">🔗 打开链接</a>
-      <button id="share" class="btn plain" type="button" hidden>📤 分享 / 粘贴到其他应用</button>
+  <main class="card">
+    <div class="top">
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />二维码生成器</a>
+      <a class="home" href="/">← 首页</a>
     </div>
-  </div>
-  <footer>内容随二维码携带,本服务不留存、无统计。</footer>
+    <p><span id="status" class="status">解码中…</span></p>
+    <div id="body" hidden>
+      <div id="content" class="content"></div>
+      <div class="actions">
+        <button id="copy" class="btn primary" type="button">📋 复制全文</button>
+        <a id="open" class="btn blue" hidden rel="noopener">🔗 打开链接</a>
+        <button id="share" class="btn plain" type="button" hidden>📤 分享 / 粘贴到其他应用</button>
+      </div>
+    </div>
+    <footer class="note">内容随二维码携带,本服务不留存、无统计。</footer>
+  </main>
   <script>
     (function () {
       var status = document.getElementById('status');
@@ -184,15 +218,20 @@ const BRIDGE_HTML_TEMPLATE = `<!doctype html>
 
       var HINT = '选择下方操作';
 
+      function setStatus(text, cls) {
+        status.textContent = text;
+        status.className = 'status' + (cls ? ' ' + cls : '');
+      }
+
       function copyThen() {
         if (!navigator.clipboard || !navigator.clipboard.writeText) {
-          status.textContent = '此浏览器不支持一键复制,请长按选择文本';
+          setStatus('此浏览器不支持一键复制,请长按选择文本', 'err');
           return;
         }
         navigator.clipboard.writeText(current).then(function () {
-          status.textContent = '已复制 ✓';
+          setStatus('已复制 ✓', 'ok');
         }, function () {
-          status.textContent = '复制失败,请长按选择文本';
+          setStatus('复制失败,请长按选择文本', 'err');
         });
       }
 
@@ -208,17 +247,17 @@ const BRIDGE_HTML_TEMPLATE = `<!doctype html>
           copyThen();
         }
         if (navigator.canShare && !navigator.canShare(payload)) {
-          status.textContent = '此环境不支持分享,已为你复制';
+          setStatus('此环境不支持分享,已为你复制');
           copyThen();
           return;
         }
-        status.textContent = '调起分享面板…';
+        setStatus('调起分享面板…');
         try {
           navigator.share(payload).then(function () {
-            status.textContent = '已分享 ✓';
+            setStatus('已分享 ✓', 'ok');
           }, function (err) {
             if (err && err.name === 'AbortError') { // 用户关闭面板,不算错误
-              status.textContent = HINT;
+              setStatus(HINT);
               return;
             }
             fallback();
@@ -237,12 +276,12 @@ const BRIDGE_HTML_TEMPLATE = `<!doctype html>
           open.hidden = false;
         }
         if (navigator.share) share.hidden = false;
-        status.textContent = HINT;
+        setStatus(HINT);
         body.hidden = false;
       }
 
       function fail() {
-        status.textContent = '内容无效或已损坏';
+        setStatus('内容无效或已损坏', 'err');
       }
 
       try {
@@ -266,33 +305,51 @@ const SEND_HTML = `<!doctype html>
   <title>传文本到其他设备</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; padding: 0 1rem; text-align: center; color: #111; }
-    textarea { width: 100%; min-height: 9rem; padding: .7rem; font-size: 1rem; font-family: inherit; box-sizing: border-box; border: 1px solid #ddd; border-radius: 10px; resize: vertical; }
-    .btn { display: inline-block; margin-top: .8rem; padding: .9rem 2.2rem; font-size: 1.05rem; border-radius: 10px; border: 0; background: #15181d; color: #fff; cursor: pointer; }
+    [hidden] { display: none !important; }
+    body { font-family: system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; margin: 0; padding: 2.5rem 1rem 3rem; color: #171a20; text-align: center; background-color: #f4f6fa; background-image: radial-gradient(720px 320px at 50% -60px, rgba(74,144,217,.16), rgba(74,144,217,0)); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .card { max-width: 430px; margin: 0 auto; background: #fff; border: 1px solid #e9edf4; border-radius: 20px; padding: 1.4rem 1.3rem 1.2rem; box-shadow: 0 12px 40px rgba(23,26,32,.07); }
+    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+    .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
+    .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
+    .home { font-size: .82rem; color: #667085; text-decoration: none; padding: .32rem .75rem; border-radius: 999px; background: #f1f4f9; }
+    .home:hover { background: #e7ecf4; color: #171a20; }
+    h1 { font-size: 1.25rem; margin: .1rem 0 .9rem; }
+    p { margin: .6rem 0 0; }
+    textarea { width: 100%; min-height: 9rem; padding: .8rem 1rem; font-size: 1rem; font-family: inherit; box-sizing: border-box; border: 1px solid #dfe5ee; border-radius: 12px; background: #f8fafd; resize: vertical; }
+    textarea:focus { outline: none; border-color: #4a90d9; background: #fff; box-shadow: 0 0 0 3px rgba(74,144,217,.15); }
+    .btn { display: block; width: 100%; margin-top: .8rem; padding: .95rem 0; font-size: 1.02rem; font-weight: 600; border-radius: 12px; border: 0; background: linear-gradient(180deg, #23272f, #15181d); color: #fff; cursor: pointer; transition: transform .06s ease, filter .15s ease; box-shadow: 0 6px 16px rgba(21,24,29,.22); }
+    .btn:active { transform: scale(.985); }
+    .btn:hover { filter: brightness(1.15); }
     .btn:disabled { opacity: .5; }
-    #msg { min-height: 1.3em; font-size: .85rem; color: #b03a2e; }
-    #result { margin-top: .5rem; }
-    #code { font-family: ui-monospace, monospace; font-size: 2.2rem; letter-spacing: .35em; margin-right: -.35em; font-weight: 700; }
-    a.claim { display: inline-block; margin: .4rem 0; font-size: .9rem; color: #1668b8; word-break: break-all; }
-    img { margin-top: .8rem; max-width: 240px; width: 100%; background: #fff; border: 1px solid #eee; }
-    .note { font-size: .8rem; color: #888; }
-    footer { margin-top: 2rem; font-size: .85rem; }
-    footer a { color: #888; }
+    #msg { min-height: 1.3em; margin: .5rem 0 0; font-size: .85rem; color: #b03a2e; }
+    .step { margin: .2rem 0 0; font-size: .85rem; color: #667085; }
+    a.claim { display: inline-block; margin: .3rem 0; font-size: .9rem; color: #1668b8; word-break: break-all; }
+    #code { font-family: ui-monospace, monospace; font-size: 2rem; letter-spacing: .35em; margin-right: -.35em; font-weight: 700; color: #171a20; background: #f1f5fb; border: 1px dashed #c9d6ea; border-radius: 12px; padding: .6rem 0 .6rem .35em; }
+    #qr { margin-top: .9rem; width: 230px; max-width: 100%; background: #fff; border: 1px solid #eef1f6; border-radius: 14px; padding: 10px; box-sizing: border-box; box-shadow: 0 8px 24px rgba(23,26,32,.08); }
+    .note { font-size: .8rem; color: #98a1b0; margin: .9rem 0 0; }
+    footer { margin-top: 1.4rem; font-size: .85rem; }
+    footer a { color: #667085; }
   </style>
 </head>
 <body>
-  <h1>传文本到其他设备</h1>
-  <p><textarea id="text" placeholder="粘贴要传输的文本,生成取件码后到另一台设备打开取件链接…"></textarea></p>
-  <p><button id="go" class="btn" type="button">生成取件码</button></p>
-  <p id="msg"></p>
-  <div id="result" hidden>
-    <p>在另一台设备:打开链接、扫码,或在首页输入取件码:</p>
-    <p><a id="claimurl" class="claim" target="_blank" rel="noopener"></a></p>
-    <p id="code"></p>
-    <p><img id="qr" alt="取件二维码" /></p>
-    <p class="note">取件码 10 分钟内有效,取件即焚(仅能取一次)。</p>
-  </div>
-  <footer><a href="/">← 返回生成二维码</a></footer>
+  <main class="card">
+    <div class="top">
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />二维码生成器</a>
+      <a class="home" href="/">← 首页</a>
+    </div>
+    <h1>传文本到其他设备</h1>
+    <p><textarea id="text" placeholder="粘贴要传输的文本,生成取件码后到另一台设备打开取件链接…"></textarea></p>
+    <p><button id="go" class="btn" type="button">生成取件码</button></p>
+    <p id="msg"></p>
+    <div id="result" hidden>
+      <p class="step">在另一台设备:打开链接、扫码,或在首页输入取件码:</p>
+      <p><a id="claimurl" class="claim" target="_blank" rel="noopener"></a></p>
+      <p id="code"></p>
+      <p><img id="qr" alt="取件二维码" /></p>
+      <p class="note">取件码 10 分钟内有效,取件即焚(仅能取一次)。</p>
+    </div>
+    <footer><a href="/">← 返回生成二维码</a></footer>
+  </main>
   <script>
     var text = document.getElementById('text');
     var go = document.getElementById('go');
@@ -342,16 +399,40 @@ const INVALID_HTML = `<!doctype html>
   <title>取件码无效</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 4rem auto; padding: 0 1rem; text-align: center; color: #111; }
-    footer { margin-top: 2rem; font-size: .85rem; }
-    footer a { color: #888; }
+    [hidden] { display: none !important; }
+    body { font-family: system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; margin: 0; padding: 2.5rem 1rem 3rem; color: #171a20; text-align: center; background-color: #f4f6fa; background-image: radial-gradient(720px 320px at 50% -60px, rgba(74,144,217,.16), rgba(74,144,217,0)); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .card { max-width: 430px; margin: 0 auto; background: #fff; border: 1px solid #e9edf4; border-radius: 20px; padding: 1.4rem 1.3rem 1.2rem; box-shadow: 0 12px 40px rgba(23,26,32,.07); }
+    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+    .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
+    .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
+    .home { font-size: .82rem; color: #667085; text-decoration: none; padding: .32rem .75rem; border-radius: 999px; background: #f1f4f9; }
+    .home:hover { background: #e7ecf4; color: #171a20; }
+    .emoji { font-size: 2.4rem; margin: .6rem 0 0; }
+    h1 { font-size: 1.25rem; margin: .5rem 0 .4rem; }
+    p { margin: .45rem 0 0; font-size: .95rem; color: #5b6472; }
+    .actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.2rem; }
+    .btn { display: flex; align-items: center; justify-content: center; gap: .45rem; width: 100%; padding: .95rem 0; font-size: 1.02rem; font-weight: 600; border-radius: 12px; border: 0; cursor: pointer; text-decoration: none; transition: transform .06s ease, filter .15s ease; }
+    .btn:active { transform: scale(.985); }
+    a.btn.blue { background: linear-gradient(180deg, #57a0f5, #3d7ef0); color: #fff; box-shadow: 0 6px 16px rgba(61,126,240,.28); }
+    a.btn.blue:hover { filter: brightness(1.06); }
+    .btn.plain { background: #fff; border: 1px solid #dfe5ee; color: #333; }
+    .btn.plain:hover { background: #f6f8fc; }
   </style>
 </head>
 <body>
-  <h1>取件码无效或已过期</h1>
-  <p>取件码 10 分钟内有效,且取件即焚(仅能取一次)。</p>
-  <p>请让发送方重新生成一个。</p>
-  <footer><a href="/send">去发送页 →</a></footer>
+  <main class="card">
+    <div class="top">
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />二维码生成器</a>
+      <a class="home" href="/">← 首页</a>
+    </div>
+    <p class="emoji">🤔</p>
+    <h1>取件码无效或已过期</h1>
+    <p>取件码 10 分钟内有效,且取件即焚(仅能取一次)。<br />请让发送方重新生成一个。</p>
+    <div class="actions">
+      <a class="btn blue" href="/send">📨 去发送页</a>
+      <a class="btn plain" href="/">返回首页</a>
+    </div>
+  </main>
 </body>
 </html>`;
 
