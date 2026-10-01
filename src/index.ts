@@ -770,8 +770,9 @@ export default {
       const kind = (entry.metadata as { kind?: string } | null)?.kind ?? 'text';
       if (kind === 'file') {
         const meta = entry.metadata as { name: string };
+        // 下载链接用相对路径:本地 dev 与线上各自指向当前域名,不会串
         return new Response(
-          fileClaimPage({ name: meta.name, size: entry.value.byteLength, url: `${url.origin}/r/${code}/download` }),
+          fileClaimPage({ name: meta.name, size: entry.value.byteLength, url: `/r/${code}/download` }),
           {
             headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
           },
