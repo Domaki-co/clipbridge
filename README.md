@@ -32,6 +32,20 @@ Roll back a bad deploy with `npx wrangler rollback` (deployment history is kept 
 
 ## API
 
+### Endpoints overview
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/` | GET | Playground page; with `?text=` returns the SVG QR |
+| `/t?d=…` | GET | Bridge page where a scanned copy-code lands |
+| `/send` | GET | Claim-code sender page |
+| `/r` | GET | Claim-code input page (auto-claims at 4 characters) |
+| `/r/:code` | GET | Claim a transfer — burn after read |
+| `/api/transfer` | POST | Create a transfer, returns `{code, url}` |
+| `/favicon.svg` | GET | Site icon |
+
+### QR generation
+
 ```
 GET /?text=...&size=...&margin=...&color=...&bg=...&ecl=...
 ```
@@ -141,6 +155,15 @@ Small, deliberate deviations from the original implementation doc:
 
 1. `@cloudflare/workers-types` is `^5` — the current wrangler v4 declares it as a peer dependency, and the doc's `^4` fails `npm install`.
 2. Text over 2 000 characters returns `400` instead of being silently truncated. The doc asked for both truncation *and* a `400` on 3 000 characters, which contradict each other; the `400` behavior is the safer one for users.
+
+## Version
+
+**v1.0.0** (2026-10-01) — first stable release:
+
+- SVG QR generation with styleable modules, colors and error-correction level
+- Bridge-by-default codes with a copy / open / share transfer page
+- Claim-code transfers (phone ↔ PC, any direction) backed by Workers KV, 32 KB cap, 10-minute TTL, burn-after-read
+- Bilingual documentation and a custom-domain-ready deployment
 
 ## License
 
