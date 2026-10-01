@@ -505,7 +505,7 @@ const FILE_CLAIM_HTML_TEMPLATE = `<!doctype html>
     <div class="actions">
       <a id="dl" class="btn blue" download>⬇️ 下载文件</a>
     </div>
-    <p class="note">取件码 10 分钟内有效,下载完成即焚。</p>
+    <p class="note">取件码 10 分钟内有效,到期自动销毁;可重复下载。</p>
   </main>
   <script>
     (function () {
@@ -760,6 +760,8 @@ export default {
         const meta = entry.metadata as { name: string; type: string };
         // content-disposition 的 ASCII 回退名:去掉非可打印字符
         const ascii = meta.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') || 'file';
+        // 文件不焚毁:手机下载管理器普遍多请求(安全预取/探测/分片/重试),
+        // 任何焚毁时机都会自相残杀。统一由 10 分钟 TTL 兜底销毁。
         const total = entry.value.byteLength;
         const headers: Record<string, string> = {
           'content-type': meta.type,
@@ -788,12 +790,6 @@ export default {
               headers: { 'content-range': `bytes */${total}` },
             });
           }
-        }
-        // 焚毁时机:仅限「无 Range 头的普通 GET」。
-        // 带任何 Range 的请求(探测 bytes=0-、分片、断点续传)一律不焚毁——
-        // 两段式内核先探测后下载、多线程并发分片,都会自相残杀;10 分钟 TTL 兜底。
-        if (request.method === 'GET' && rangeHdr === null) {
-          await env.TRANSFERS.delete('t:' + dCode);
         }
         const slice = partial ? entry.value.slice(start, end + 1) : entry.value;
         headers['content-length'] = String(end - start + 1);

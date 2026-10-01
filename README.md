@@ -41,8 +41,8 @@ Roll back a bad deploy with `npx wrangler rollback` (deployment history is kept 
 | `/t?d=…` | GET | Bridge page where a scanned copy-code lands |
 | `/send` | GET | Claim-code sender page |
 | `/r` | GET | Claim-code input page (auto-claims at 4 characters) |
-| `/r/:code` | GET | Claim a transfer — burn after read (files burn on download) |
-| `/r/:code/download` | GET | Download a claimed file — burn on download |
+| `/r/:code` | GET | Claim a transfer — text burns on read; files stay claimable until TTL |
+| `/r/:code/download` | GET | Download a claimed file |
 | `/api/transfer` | POST | Create a transfer — JSON body for text, raw bytes + `x-file-name` header for files |
 | `/favicon.svg` | GET | Site icon |
 
@@ -108,7 +108,7 @@ Scanning needs a camera on the receiving side, which phones have and PCs rarely 
 
 Notes: the code is stored in Workers KV with a 10-minute TTL and is **deleted on first read** (burn after reading), so a leaked or stale code is worthless. The receiver page is the same bridge page served with the payload inlined — no redirect, no URL-length limits. KV free tier allows 1 000 writes/day, far beyond personal use.
 
-**Files** ride the exact same flow: pick or drop a file on `/send` (up to 25 MB, the KV value limit), and the receiver sees a download page with the file name and size. The claim page can be refreshed freely. Burn semantics: only a **plain GET without a `Range` header** (the single-shot download Safari/Chrome make) consumes the code — `HEAD` probes, `bytes=0-` pre-flights, ranged and multi-threaded downloads (Quark, UC, etc.) never burn it, and the 10-minute TTL cleans up whatever was not downloaded. File names and MIME types are preserved (`Content-Disposition` uses RFC 5987 encoding for non-ASCII names), and the download anchor carries the `download` attribute.
+**Files** ride the exact same flow: pick or drop a file on `/send` (up to 25 MB, the KV value limit), and the receiver sees a download page with the file name and size. Files do **not** burn on download — they stay claimable until the 10-minute TTL expires, because mobile download managers fire multi-request patterns (security pre-fetches, `Range: bytes=0-` probes, multi-threaded chunks, retries) that make instant-burn semantics self-defeating. The download route fully supports `Range` (`206 Partial Content`) and `HEAD` so Quark/UC-style managers work, file names and MIME types are preserved (`Content-Disposition` uses RFC 5987 for non-ASCII names), and the anchor carries the `download` attribute. Text keeps its stricter burn-after-read.
 
 ### Handy payload formats
 
