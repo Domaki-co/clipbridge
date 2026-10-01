@@ -29,9 +29,10 @@ const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"
 // 预算内保证扫得出;超出预算的请求回退为普通文本码。
 const BRIDGE_URL_MAX_BYTES = 1500;
 
-// 取件码互传:KV 存 10 分钟自动过期,取件即焚,单条上限 32KB
+// 取件码互传:KV 存 10 分钟自动过期,取件即焚,文本上限 32KB,文件上限 25MB
 const TRANSFER_TTL_SECONDS = 600;
 const TRANSFER_MAX_BYTES = 32768;
+const MAX_FILE_BYTES = 25 * 1000 * 1000; // KV 单值硬顶 25MiB,留出安全余量
 // 无歧义字符表:去掉 I/L/O/0/1,避免手抄混淆
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
@@ -298,6 +299,15 @@ const SEND_HTML = `<!doctype html>
     .btn:hover { filter: brightness(1.15); }
     .btn:disabled { opacity: .5; }
     #msg { min-height: 1.3em; margin: .5rem 0 0; font-size: .85rem; color: #b03a2e; }
+    #progress { min-height: 1.2em; margin: .5rem 0 0; font-size: .82rem; color: #667085; }
+    .or { display: flex; align-items: center; gap: .8rem; color: #98a1b0; font-size: .8rem; margin: 1.1rem 0 0; }
+    .or::before, .or::after { content: ''; flex: 1; height: 1px; background: #e6eaf1; }
+    .filebox { margin-top: .7rem; }
+    .pickbtn { padding: .55rem 1.1rem; font-size: .9rem; border-radius: 10px; border: 1px dashed #c6cede; background: #f8fafd; color: #444; cursor: pointer; }
+    .pickbtn:hover { border-color: #4a90d9; color: #1668b8; }
+    .chip { display: inline-flex; align-items: center; gap: .5rem; max-width: 100%; padding: .45rem .85rem; background: #f1f5fb; border-radius: 999px; font-size: .85rem; }
+    .chipname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chip button { border: 0; background: none; cursor: pointer; color: #7a8190; font-size: .9rem; padding: 0; }
     .step { margin: .2rem 0 0; font-size: .85rem; color: #667085; }
     a.claim { display: inline-block; margin: .3rem 0; font-size: .9rem; color: #1668b8; word-break: break-all; }
     #code { font-family: ui-monospace, monospace; font-size: 2rem; letter-spacing: .35em; margin-right: -.35em; font-weight: 700; color: #171a20; background: #f1f5fb; border: 1px dashed #c9d6ea; border-radius: 12px; padding: .6rem 0 .6rem .35em; }
@@ -313,16 +323,23 @@ const SEND_HTML = `<!doctype html>
       <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
       <a class="home" href="/">← 首页</a>
     </div>
-    <h1>传文本到其他设备</h1>
+    <h1>传文本 / 文件到其他设备</h1>
     <p><textarea id="text" placeholder="粘贴要传输的文本,生成取件码后到另一台设备打开取件链接…"></textarea></p>
+    <p class="or"><span>或发送文件</span></p>
+    <div class="filebox" id="filebox">
+      <input type="file" id="file" hidden />
+      <button id="pick" class="pickbtn" type="button">📎 选择文件(≤ 25MB)</button>
+      <span id="chip" class="chip" hidden><span id="chipname" class="chipname"></span><button id="chipx" type="button" aria-label="移除文件">✕</button></span>
+    </div>
     <p><button id="go" class="btn" type="button">生成取件码</button></p>
+    <p id="progress"></p>
     <p id="msg"></p>
     <div id="result" hidden>
       <p class="step">在另一台设备:打开链接、扫码,或在首页输入取件码:</p>
       <p><a id="claimurl" class="claim" target="_blank" rel="noopener"></a></p>
       <p id="code"></p>
       <p><img id="qr" alt="取件二维码" /></p>
-      <p class="note">取件码 10 分钟内有效,取件即焚(仅能取一次)。</p>
+      <p class="note">取件码 10 分钟内有效;文本取件即焚,文件在下载后焚毁。</p>
     </div>
     <footer><a href="/">← 返回生成二维码</a></footer>
   </main>
@@ -330,14 +347,91 @@ const SEND_HTML = `<!doctype html>
     var text = document.getElementById('text');
     var go = document.getElementById('go');
     var msg = document.getElementById('msg');
+    var progress = document.getElementById('progress');
     var result = document.getElementById('result');
     var claimurl = document.getElementById('claimurl');
     var code = document.getElementById('code');
     var qr = document.getElementById('qr');
+    var fileInput = document.getElementById('file');
+    var pick = document.getElementById('pick');
+    var chip = document.getElementById('chip');
+    var chipname = document.getElementById('chipname');
+    var filebox = document.getElementById('filebox');
+    var currentFile = null;
+
+    function fmtSize(n) {
+      if (n >= 1000 * 1000) return (n / 1000 / 1000).toFixed(1) + ' MB';
+      if (n >= 1000) return (n / 1000).toFixed(1) + ' KB';
+      return n + ' B';
+    }
+
+    function setFile(f) {
+      currentFile = f || null;
+      if (currentFile) {
+        document.getElementById('chipname').textContent = currentFile.name + ' · ' + fmtSize(currentFile.size);
+        chip.hidden = false;
+        pick.hidden = true;
+      } else {
+        fileInput.value = '';
+        chip.hidden = true;
+        pick.hidden = false;
+      }
+    }
+
+    pick.addEventListener('click', function () { fileInput.click(); });
+    fileInput.addEventListener('change', function () { setFile(fileInput.files[0]); });
+    document.getElementById('chipx').addEventListener('click', function () { setFile(null); });
+    // 拖拽:防止浏览器直接打开文件,只接收第一个文件
+    document.addEventListener('dragover', function (e) { e.preventDefault(); });
+    document.addEventListener('drop', function (e) { e.preventDefault(); });
+    filebox.addEventListener('drop', function (e) {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+    });
+
+    function showResult(j) {
+      msg.textContent = '';
+      progress.textContent = '';
+      code.textContent = j.code.split('').join(' ');
+      claimurl.textContent = j.url;
+      claimurl.href = j.url;
+      // 取件链接本身作为码内容直出(mode=text),扫码即达取件页
+      qr.src = '/?text=' + encodeURIComponent(j.url) + '&mode=text';
+      result.hidden = false;
+    }
+
+    function uploadFile() {
+      var f = currentFile;
+      if (f.size > 25 * 1000 * 1000) { msg.textContent = '文件超过 25MB 上限'; return; }
+      go.disabled = true;
+      msg.textContent = '';
+      progress.textContent = '上传中 0%';
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/transfer');
+      xhr.setRequestHeader('content-type', f.type || 'application/octet-stream');
+      try { xhr.setRequestHeader('x-file-name', encodeURIComponent(f.name)); } catch (e) {}
+      xhr.upload.onprogress = function (e) {
+        if (e.lengthComputable) progress.textContent = '上传中 ' + Math.round((e.loaded / e.total) * 100) + '%';
+      };
+      xhr.onload = function () {
+        go.disabled = false;
+        progress.textContent = '';
+        var j = {};
+        try { j = JSON.parse(xhr.responseText); } catch (e) {}
+        if (xhr.status === 200) { showResult(j); }
+        else { msg.textContent = j.error || '上传失败,请重试'; }
+      };
+      xhr.onerror = function () {
+        go.disabled = false;
+        progress.textContent = '';
+        msg.textContent = '网络错误,请重试';
+      };
+      xhr.send(f);
+    }
 
     go.addEventListener('click', function () {
+      if (currentFile) { uploadFile(); return; }
       var t = text.value.trim();
-      if (!t) { msg.textContent = '请先输入内容'; return; }
+      if (!t) { msg.textContent = '请先输入内容或选择文件'; return; }
       if (new TextEncoder().encode(t).length > 32768) { msg.textContent = '内容超过 32KB 上限'; return; }
       go.disabled = true;
       msg.textContent = '生成中…';
@@ -350,18 +444,75 @@ const SEND_HTML = `<!doctype html>
       }).then(function (res) {
         go.disabled = false;
         if (!res.ok) { msg.textContent = res.j.error || '生成失败,请重试'; return; }
-        msg.textContent = '';
-        code.textContent = res.j.code.split('').join(' ');
-        claimurl.textContent = res.j.url;
-        claimurl.href = res.j.url;
-        // 取件链接本身作为码内容直出(mode=text),扫码即达取件页
-        qr.src = '/?text=' + encodeURIComponent(res.j.url) + '&mode=text';
-        result.hidden = false;
+        showResult(res.j);
       }, function () {
         go.disabled = false;
         msg.textContent = '网络错误,请重试';
       });
     });
+  </script>
+</body>
+</html>`;
+
+// 文件取件页:展示文件名/大小,下载按钮指向 /r/:code/download(下载即焚)。
+// __META__ 注入 {name,size,url},文件名一律 textContent 渲染,防 XSS。
+function fileClaimPage(meta: { name: string; size: number; url: string }): string {
+  return FILE_CLAIM_HTML_TEMPLATE.replace('__META__', () => JSON.stringify(meta));
+}
+
+const FILE_CLAIM_HTML_TEMPLATE = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>文件取件</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <style>
+    [hidden] { display: none !important; }
+    body { font-family: system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; margin: 0; padding: 2.5rem 1rem 3rem; color: #171a20; text-align: center; background-color: #f4f6fa; background-image: radial-gradient(720px 320px at 50% -60px, rgba(74,144,217,.16), rgba(74,144,217,0)); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .card { max-width: 430px; margin: 0 auto; background: #fff; border: 1px solid #e9edf4; border-radius: 20px; padding: 1.4rem 1.3rem 1.2rem; box-shadow: 0 12px 40px rgba(23,26,32,.07); }
+    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+    .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
+    .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
+    .home { font-size: .82rem; color: #667085; text-decoration: none; padding: .32rem .75rem; border-radius: 999px; background: #f1f4f9; }
+    .home:hover { background: #e7ecf4; color: #171a20; }
+    .emoji { font-size: 2.6rem; margin: .5rem 0 0; }
+    .name { margin: .7rem 0 0; font-size: 1.05rem; font-weight: 600; word-break: break-all; text-align: left; }
+    .size { margin: .3rem 0 0; font-size: .85rem; color: #7a8190; }
+    .actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.2rem; }
+    a.btn { display: flex; align-items: center; justify-content: center; gap: .45rem; width: 100%; padding: .95rem 0; font-size: 1.02rem; font-weight: 600; border-radius: 12px; border: 0; cursor: pointer; text-decoration: none; transition: transform .06s ease, filter .15s ease; }
+    a.btn:active { transform: scale(.985); }
+    a.btn.blue { background: linear-gradient(180deg, #57a0f5, #3d7ef0); color: #fff; box-shadow: 0 6px 16px rgba(61,126,240,.28); }
+    a.btn.blue:hover { filter: brightness(1.06); }
+    .note { margin: 1.1rem 0 0; font-size: .78rem; color: #98a1b0; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="top">
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
+      <a class="home" href="/">← 首页</a>
+    </div>
+    <p class="emoji">📄</p>
+    <p class="name" id="name"></p>
+    <p class="size" id="size"></p>
+    <div class="actions">
+      <a id="dl" class="btn blue">⬇️ 下载文件</a>
+    </div>
+    <p class="note">下载即焚:点击下载后此取件码失效,请保存好文件。</p>
+  </main>
+  <script>
+    (function () {
+      var meta = __META__;
+      function fmtSize(n) {
+        if (n >= 1000 * 1000) return (n / 1000 / 1000).toFixed(1) + ' MB';
+        if (n >= 1000) return (n / 1000).toFixed(1) + ' KB';
+        return n + ' B';
+      }
+      document.getElementById('name').textContent = meta.name;
+      document.getElementById('size').textContent = fmtSize(meta.size);
+      document.getElementById('dl').href = meta.url;
+    })();
   </script>
 </body>
 </html>`;
@@ -550,6 +701,13 @@ function randomCode(): string {
   return code;
 }
 
+function invalidClaim(): Response {
+  return new Response(INVALID_HTML, {
+    status: 404,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+  });
+}
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
@@ -584,23 +742,43 @@ export default {
       });
     }
 
-    // 取件:凭码从 KV 取出文本(取件即焚),内联进中转页返回
+    // 取件:文本 → 取件即焚 + 内联中转页;文件 → 不消费取件码的下载页
     if (url.pathname.startsWith('/r/')) {
-      const code = url.pathname.slice(3).trim().toUpperCase();
-      if (!/^[A-HJKMNP-Z2-9]{4}$/.test(code)) {
-        return new Response(INVALID_HTML, {
-          status: 404,
-          headers: { 'content-type': 'text/html; charset=utf-8' },
+      // 文件字节流:点击下载时才焚毁
+      if (url.pathname.endsWith('/download')) {
+        const dCode = url.pathname.slice(3, -'/download'.length).trim().toUpperCase();
+        if (!/^[A-HJKMNP-Z2-9]{4}$/.test(dCode)) return invalidClaim();
+        const entry = await env.TRANSFERS.getWithMetadata('t:' + dCode, { type: 'arrayBuffer' });
+        if (entry.value === null || (entry.metadata as { kind?: string } | null)?.kind !== 'file') return invalidClaim();
+        await env.TRANSFERS.delete('t:' + dCode);
+        const meta = entry.metadata as { name: string; type: string };
+        // content-disposition 的 ASCII 回退名:去掉非可打印字符
+        const ascii = meta.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') || 'file';
+        return new Response(entry.value, {
+          headers: {
+            'content-type': meta.type,
+            'content-disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(meta.name)}`,
+            'cache-control': 'no-store',
+          },
         });
       }
-      const text = await env.TRANSFERS.get('t:' + code);
-      if (text === null) {
-        return new Response(INVALID_HTML, {
-          status: 404,
-          headers: { 'content-type': 'text/html; charset=utf-8' },
-        });
+      const code = url.pathname.slice(3).trim().toUpperCase();
+      if (!/^[A-HJKMNP-Z2-9]{4}$/.test(code)) return invalidClaim();
+      // 统一按二进制读;文本值是 UTF-8 字节,解码即可,无需区分存入形态
+      const entry = await env.TRANSFERS.getWithMetadata('t:' + code, { type: 'arrayBuffer' });
+      if (entry.value === null) return invalidClaim();
+      const kind = (entry.metadata as { kind?: string } | null)?.kind ?? 'text';
+      if (kind === 'file') {
+        const meta = entry.metadata as { name: string };
+        return new Response(
+          fileClaimPage({ name: meta.name, size: entry.value.byteLength, url: `${url.origin}/r/${code}/download` }),
+          {
+            headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+          },
+        );
       }
       await env.TRANSFERS.delete('t:' + code);
+      const text = new TextDecoder().decode(entry.value);
       const raw = new TextEncoder().encode(text);
       let d: string;
       let z = 0;
@@ -618,25 +796,55 @@ export default {
       return bridgeResponse(bridgeHtml({ d, z }));
     }
 
-    // 生成取件码
+    // 生成取件码:application/json → 文本;其余 content-type → 二进制文件
     if (url.pathname === '/api/transfer' && request.method === 'POST') {
-      let text: string;
-      try {
-        const body = (await request.json()) as { text?: string };
-        text = (body.text ?? '').trim();
-      } catch {
-        return errorJson('请求体须为 JSON', 400);
+      const isFile = !(request.headers.get('content-type') ?? '').includes('application/json');
+      let value: string | ArrayBuffer;
+      let kind: 'text' | 'file';
+      let fileMeta: { name: string; type: string } | undefined;
+
+      if (isFile) {
+        const declared = Number(request.headers.get('content-length') ?? '0');
+        if (declared > MAX_FILE_BYTES) return errorJson('文件超过 25MB 上限', 400);
+        const buf = await request.arrayBuffer();
+        if (buf.byteLength === 0) return errorJson('文件内容为空', 400);
+        if (buf.byteLength > MAX_FILE_BYTES) return errorJson('文件超过 25MB 上限', 400);
+        let name = 'file';
+        try {
+          name = decodeURIComponent(request.headers.get('x-file-name') ?? '') || 'file';
+        } catch {
+          name = 'file';
+        }
+        // 去控制字符、截到末尾 120 字符(保住扩展名),metadata 上限 1024 字节
+        name = name.replace(/[\u0000-\u001f\u007f]/g, '').slice(-120) || 'file';
+        const typeHdr = request.headers.get('content-type') ?? '';
+        const type = /^[\w.+-]+\/[\w.+-]+$/.test(typeHdr) ? typeHdr : 'application/octet-stream';
+        value = buf;
+        kind = 'file';
+        fileMeta = { name, type };
+      } else {
+        let text: string;
+        try {
+          const body = (await request.json()) as { text?: string };
+          text = (body.text ?? '').trim();
+        } catch {
+          return errorJson('请求体须为 JSON', 400);
+        }
+        if (!text) {
+          return errorJson('内容不能为空', 400);
+        }
+        if (new TextEncoder().encode(text).length > TRANSFER_MAX_BYTES) {
+          return errorJson('内容超过 32KB 上限', 400);
+        }
+        value = text;
+        kind = 'text';
       }
-      if (!text) {
-        return errorJson('内容不能为空', 400);
-      }
-      if (new TextEncoder().encode(text).length > TRANSFER_MAX_BYTES) {
-        return errorJson('内容超过 32KB 上限', 400);
-      }
+
       let code = '';
       for (let attempt = 0; attempt < 3; attempt++) {
         const candidate = randomCode();
-        if ((await env.TRANSFERS.get('t:' + candidate)) === null) {
+        // 探测用 arrayBuffer:候选码若撞上已存的二进制值,按文本读会报错
+        if ((await env.TRANSFERS.getWithMetadata('t:' + candidate, { type: 'arrayBuffer' })).value === null) {
           code = candidate;
           break;
         }
@@ -644,8 +852,11 @@ export default {
       if (!code) {
         return errorJson('取件码生成失败,请重试', 500);
       }
-      await env.TRANSFERS.put('t:' + code, text, { expirationTtl: TRANSFER_TTL_SECONDS });
-      return new Response(JSON.stringify({ code, url: `${url.origin}/r/${code}` }), {
+      await env.TRANSFERS.put('t:' + code, value, {
+        expirationTtl: TRANSFER_TTL_SECONDS,
+        metadata: { kind, ...(fileMeta ?? {}) },
+      });
+      return new Response(JSON.stringify({ code, url: `${url.origin}/r/${code}`, kind }), {
         headers: { 'content-type': 'application/json; charset=utf-8' },
       });
     }
