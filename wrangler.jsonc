@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "qr-generator",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "routes": [{ "pattern": "qr.sparkfly.top", "custom_domain": true }],
+  "kv_namespaces": [{ "binding": "TRANSFERS", "id": "21138086f41c4634822c4d91d1ddf2c5" }]
+}
