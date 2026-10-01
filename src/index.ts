@@ -324,7 +324,7 @@ const SEND_HTML = `<!doctype html>
       <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
       <a class="home" href="/">← 首页</a>
     </div>
-    <p id="devwarn" class="devwarn" hidden>⚠️ 本地开发环境:取件数据只存在本机,而取件链接指向线上域名——手机扫码会取不到。完整流程请在 qr.sparkfly.top 上测试。</p>
+    <p id="devwarn" class="devwarn" hidden>⚠️ 本地开发环境:取件数据只存在本机,而取件链接指向线上域名——手机扫码会取不到。完整流程请在线上域名下测试。</p>
     <h1>传文本 / 文件到其他设备</h1>
     <p><textarea id="text" placeholder="粘贴要传输的文本,生成取件码后到另一台设备打开取件链接…"></textarea></p>
     <p class="or"><span>或发送文件</span></p>
