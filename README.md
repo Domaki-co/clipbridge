@@ -11,6 +11,7 @@
 - **Styleable** — module pixel size, quiet-zone margin, foreground/background colors, error-correction level
 - **Built-in playground** — visiting the root URL without `?text=` serves a minimal form page
 - **Copy bridge by default** — every code encodes a short link to a transfer page where the scanner chooses to copy, open or share; `mode=text` encodes raw content instead
+- **Claim-code transfer** — `/send` turns pasted text into a 4-character claim code; open `/r/<code>` anywhere to receive it. No camera needed, works in every direction (phone ↔ PC), up to 32 KB, self-destructs after 10 minutes or on first read
 - **Fault-tolerant** — out-of-range numbers are clamped, invalid colors fall back to defaults; bad input never causes a 500
 - **CORS-ready** — `Access-Control-Allow-Origin: *`, so the API can be embedded from any origin
 - **Stateless & free** — no database, KV or R2; runs comfortably inside the Workers free tier
@@ -80,6 +81,16 @@ Every code is a bridge code by default: instead of the raw text it encodes a sho
 - Data rides entirely in the URL (base64url, `deflate-raw` compressed whenever that is shorter) — the server decodes nothing and stores nothing.
 - The bridge URL is capped at 1 500 bytes; anything longer automatically falls back to a plain-text code.
 - Caveats: the payload is visible to anyone holding the link and ends up in browser history — don't bridge secrets. The clipboard API requires a user gesture and a secure context (HTTPS), hence the explicit buttons plus a silent auto-copy attempt.
+
+### Claim-code transfer (any device, any direction)
+
+Scanning needs a camera on the receiving side, which phones have and PCs rarely use. For the other direction — phone → PC, or PC → PC — use claim codes:
+
+1. Open `/send`, paste the text (up to 32 KB), tap **生成取件码**.
+2. You get a 4-character code (e.g. `K7X2`), a claim URL, and a QR of that URL.
+3. On any other device, open `https://qr.example.com/r/K7X2` — the usual copy/open/share page appears.
+
+Notes: the code is stored in Workers KV with a 10-minute TTL and is **deleted on first read** (burn after reading), so a leaked or stale code is worthless. The receiver page is the same bridge page served with the payload inlined — no redirect, no URL-length limits. KV free tier allows 1 000 writes/day, far beyond personal use.
 
 ### Handy payload formats
 

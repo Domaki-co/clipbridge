@@ -4,7 +4,9 @@ import { renderSVG } from 'uqr';
 // SVG 相关选项:pixelSize(默认 10)、border(默认 1)、
 // blackColor(默认 'black')、whiteColor(默认 'white')、ecc(默认 'L')
 
-interface Env {}
+interface Env {
+  TRANSFERS: KVNamespace;
+}
 
 const ECC_LEVELS = ['L', 'M', 'Q', 'H'] as const;
 
@@ -27,6 +29,12 @@ const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"
 // 预算内保证扫得出;超出预算的请求回退为普通文本码。
 const BRIDGE_URL_MAX_BYTES = 1500;
 
+// 取件码互传:KV 存 10 分钟自动过期,取件即焚,单条上限 32KB
+const TRANSFER_TTL_SECONDS = 600;
+const TRANSFER_MAX_BYTES = 32768;
+// 无歧义字符表:去掉 I/L/O/0/1,避免手抄混淆
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
 const LANDING_HTML = `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -41,6 +49,8 @@ const LANDING_HTML = `<!doctype html>
     #hint { min-height: 1.2em; font-size: .8rem; color: #888; }
     img { margin-top: 1.5rem; max-width: 100%; background: #fff; border: 1px solid #eee; }
     code { display: block; margin-top: .5rem; font-size: .8rem; color: #666; word-break: break-all; }
+    .nav { margin-top: 2rem; }
+    .nav a { font-size: .85rem; color: #888; }
   </style>
 </head>
 <body>
@@ -49,6 +59,7 @@ const LANDING_HTML = `<!doctype html>
   <p id="hint"></p>
   <p><img id="qr" hidden alt="二维码预览" /></p>
   <code id="link"></code>
+  <p class="nav"><a href="/send">反向传输?用取件码把文本传到电脑 →</a></p>
   <script>
     var input = document.getElementById('text');
     var img = document.getElementById('qr');
@@ -82,7 +93,14 @@ const LANDING_HTML = `<!doctype html>
 // 交互:扫码后立即给出三选一 —— 复制全文 / 打开链接(仅 URL) / 分享到其他应用
 // (系统分享面板,即"粘贴进 App")。剪贴板只在点击「复制全文」时写入,不做隐式复制。
 // 缓存只给 5 分钟:页面交互迭代频繁,避免手机浏览器长时间滞留旧版。
-const BRIDGE_HTML = `<!doctype html>
+// 中转页模板:__PAYLOAD__ 由 bridgeHtml() 注入——/t 传 null(读 URL 参数),
+// /r/:code 传 {d,z}(服务端内联,避免重定向与 URL 长度限制)。
+// replace 用函数形式,防止载荷内容被当作替换模式解释。
+function bridgeHtml(payload: { d: string; z: number } | null): string {
+  return BRIDGE_HTML_TEMPLATE.replace('__PAYLOAD__', () => JSON.stringify(payload));
+}
+
+const BRIDGE_HTML_TEMPLATE = `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -121,7 +139,10 @@ const BRIDGE_HTML = `<!doctype html>
       var open = document.getElementById('open');
       var share = document.getElementById('share');
       var q = new URLSearchParams(location.search);
-      var d = q.get('d');
+      // /t 由 URL 查询参数携带(PAYLOAD 为 null),/r/:code 由服务端内联
+      var init = __PAYLOAD__;
+      var d = init ? init.d : q.get('d');
+      var compressed = init ? init.z === 1 : q.get('z') === '1';
       var current = '';
 
       function bytesFromB64Url(s) {
@@ -205,13 +226,111 @@ const BRIDGE_HTML = `<!doctype html>
 
       try {
         var bytes = bytesFromB64Url(d);
-        var p = q.get('z') === '1' ? inflateRaw(bytes) : Promise.resolve(bytes);
+        var p = compressed ? inflateRaw(bytes) : Promise.resolve(bytes);
         p.then(function (b) { show(new TextDecoder().decode(b)); }, fail);
       } catch (e) {
         fail();
       }
     })();
   </script>
+</body>
+</html>`;
+
+// 取件码发送页:输入文本 → 生成 4 位取件码 + 取件链接 + 取件二维码
+const SEND_HTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>传文本到其他设备</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 3rem auto; padding: 0 1rem; text-align: center; color: #111; }
+    textarea { width: 100%; min-height: 9rem; padding: .7rem; font-size: 1rem; font-family: inherit; box-sizing: border-box; border: 1px solid #ddd; border-radius: 10px; resize: vertical; }
+    .btn { display: inline-block; margin-top: .8rem; padding: .9rem 2.2rem; font-size: 1.05rem; border-radius: 10px; border: 0; background: #15181d; color: #fff; cursor: pointer; }
+    .btn:disabled { opacity: .5; }
+    #msg { min-height: 1.3em; font-size: .85rem; color: #b03a2e; }
+    #result { margin-top: .5rem; }
+    #code { font-family: ui-monospace, monospace; font-size: 2.2rem; letter-spacing: .35em; margin-right: -.35em; font-weight: 700; }
+    a.claim { display: inline-block; margin: .4rem 0; font-size: .9rem; color: #1668b8; word-break: break-all; }
+    img { margin-top: .8rem; max-width: 240px; width: 100%; background: #fff; border: 1px solid #eee; }
+    .note { font-size: .8rem; color: #888; }
+    footer { margin-top: 2rem; font-size: .85rem; }
+    footer a { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>传文本到其他设备</h1>
+  <p><textarea id="text" placeholder="粘贴要传输的文本,生成取件码后到另一台设备打开取件链接…"></textarea></p>
+  <p><button id="go" class="btn" type="button">生成取件码</button></p>
+  <p id="msg"></p>
+  <div id="result" hidden>
+    <p>在另一台设备打开这个链接,或扫码:</p>
+    <p><a id="claimurl" class="claim" target="_blank" rel="noopener"></a></p>
+    <p id="code"></p>
+    <p><img id="qr" alt="取件二维码" /></p>
+    <p class="note">取件码 10 分钟内有效,取件即焚(仅能取一次)。</p>
+  </div>
+  <footer><a href="/">← 返回生成二维码</a></footer>
+  <script>
+    var text = document.getElementById('text');
+    var go = document.getElementById('go');
+    var msg = document.getElementById('msg');
+    var result = document.getElementById('result');
+    var claimurl = document.getElementById('claimurl');
+    var code = document.getElementById('code');
+    var qr = document.getElementById('qr');
+
+    go.addEventListener('click', function () {
+      var t = text.value.trim();
+      if (!t) { msg.textContent = '请先输入内容'; return; }
+      if (new TextEncoder().encode(t).length > 32768) { msg.textContent = '内容超过 32KB 上限'; return; }
+      go.disabled = true;
+      msg.textContent = '生成中…';
+      fetch('/api/transfer', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: t })
+      }).then(function (r) {
+        return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+      }).then(function (res) {
+        go.disabled = false;
+        if (!res.ok) { msg.textContent = res.j.error || '生成失败,请重试'; return; }
+        msg.textContent = '';
+        code.textContent = res.j.code.split('').join(' ');
+        claimurl.textContent = res.j.url;
+        claimurl.href = res.j.url;
+        // 取件链接本身作为码内容直出(mode=text),扫码即达取件页
+        qr.src = '/?text=' + encodeURIComponent(res.j.url) + '&mode=text';
+        result.hidden = false;
+      }, function () {
+        go.disabled = false;
+        msg.textContent = '网络错误,请重试';
+      });
+    });
+  </script>
+</body>
+</html>`;
+
+// 取件失败页:取件码无效、已过期或已被取走
+const INVALID_HTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>取件码无效</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 4rem auto; padding: 0 1rem; text-align: center; color: #111; }
+    footer { margin-top: 2rem; font-size: .85rem; }
+    footer a { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>取件码无效或已过期</h1>
+  <p>取件码 10 分钟内有效,且取件即焚(仅能取一次)。</p>
+  <p>请让发送方重新生成一个。</p>
+  <footer><a href="/send">去发送页 →</a></footer>
 </body>
 </html>`;
 
@@ -268,8 +387,25 @@ async function bridgeContent(origin: string, text: string): Promise<string> {
   return usable.length > 0 ? usable[0].u : text;
 }
 
+function bridgeResponse(html: string): Response {
+  return new Response(html, {
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'public, max-age=300',
+    },
+  });
+}
+
+function randomCode(): string {
+  let code = '';
+  for (let i = 0; i < 4; i++) {
+    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
 export default {
-  async fetch(request, _env, ctx): Promise<Response> {
+  async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
     const params = url.searchParams;
 
@@ -285,11 +421,79 @@ export default {
 
     // 复制中转页:扫码侧落地,内容自携带于查询参数
     if (url.pathname === '/t') {
-      return new Response(BRIDGE_HTML, {
-        headers: {
-          'content-type': 'text/html; charset=utf-8',
-          'cache-control': 'public, max-age=300',
-        },
+      return bridgeResponse(bridgeHtml(null));
+    }
+
+    // 取件码发送页:任意设备生成取件码,另一台设备凭码取件
+    if (url.pathname === '/send') {
+      return new Response(SEND_HTML, {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    }
+
+    // 取件:凭码从 KV 取出文本(取件即焚),内联进中转页返回
+    if (url.pathname.startsWith('/r/')) {
+      const code = url.pathname.slice(3).trim().toUpperCase();
+      if (!/^[A-HJKMNP-Z2-9]{4}$/.test(code)) {
+        return new Response(INVALID_HTML, {
+          status: 404,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        });
+      }
+      const text = await env.TRANSFERS.get('t:' + code);
+      if (text === null) {
+        return new Response(INVALID_HTML, {
+          status: 404,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        });
+      }
+      await env.TRANSFERS.delete('t:' + code);
+      const raw = new TextEncoder().encode(text);
+      let d: string;
+      let z = 0;
+      try {
+        const deflated = await deflateRaw(raw);
+        if (deflated.length < raw.length) {
+          d = toBase64Url(deflated);
+          z = 1;
+        } else {
+          d = toBase64Url(raw);
+        }
+      } catch {
+        d = toBase64Url(raw);
+      }
+      return bridgeResponse(bridgeHtml({ d, z }));
+    }
+
+    // 生成取件码
+    if (url.pathname === '/api/transfer' && request.method === 'POST') {
+      let text: string;
+      try {
+        const body = (await request.json()) as { text?: string };
+        text = (body.text ?? '').trim();
+      } catch {
+        return errorJson('请求体须为 JSON', 400);
+      }
+      if (!text) {
+        return errorJson('内容不能为空', 400);
+      }
+      if (new TextEncoder().encode(text).length > TRANSFER_MAX_BYTES) {
+        return errorJson('内容超过 32KB 上限', 400);
+      }
+      let code = '';
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const candidate = randomCode();
+        if ((await env.TRANSFERS.get('t:' + candidate)) === null) {
+          code = candidate;
+          break;
+        }
+      }
+      if (!code) {
+        return errorJson('取件码生成失败,请重试', 500);
+      }
+      await env.TRANSFERS.put('t:' + code, text, { expirationTtl: TRANSFER_TTL_SECONDS });
+      return new Response(JSON.stringify({ code, url: `${url.origin}/r/${code}` }), {
+        headers: { 'content-type': 'application/json; charset=utf-8' },
       });
     }
 
@@ -338,4 +542,4 @@ export default {
       return errorJson('内容过长或含无法编码的字符', 400);
     }
   },
-} satisfies ExportedHandler;
+} satisfies ExportedHandler<Env>;
