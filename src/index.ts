@@ -49,8 +49,11 @@ const LANDING_HTML = `<!doctype html>
     #hint { min-height: 1.2em; font-size: .8rem; color: #888; }
     img { margin-top: 1.5rem; max-width: 100%; background: #fff; border: 1px solid #eee; }
     code { display: block; margin-top: .5rem; font-size: .8rem; color: #666; word-break: break-all; }
-    .nav { margin-top: 2rem; }
+    .nav { margin-top: 1.6rem; }
     .nav a { font-size: .85rem; color: #888; }
+    .claimbox { margin-top: .6rem; font-size: .9rem; color: #444; }
+    .claimbox input { width: 6.5em; text-align: center; text-transform: uppercase; font-family: ui-monospace, monospace; letter-spacing: .2em; padding: .35rem; font-size: 1rem; border: 1px solid #ddd; border-radius: 8px; }
+    .claimbox button { padding: .38rem 1rem; margin-left: .3rem; border: 0; border-radius: 8px; background: #15181d; color: #fff; cursor: pointer; font-size: .95rem; }
   </style>
 </head>
 <body>
@@ -59,6 +62,7 @@ const LANDING_HTML = `<!doctype html>
   <p id="hint"></p>
   <p><img id="qr" hidden alt="二维码预览" /></p>
   <code id="link"></code>
+  <p class="claimbox">收到取件码?<input id="claim" placeholder="如 K7X2" maxlength="4" autocomplete="off" /><button id="claimgo" type="button">取件</button></p>
   <p class="nav"><a href="/send">反向传输?用取件码把文本传到电脑 →</a></p>
   <script>
     var input = document.getElementById('text');
@@ -83,6 +87,23 @@ const LANDING_HTML = `<!doctype html>
       img.src = u.toString();
       img.hidden = false;
       link.textContent = u.toString();
+    });
+
+    // 取件码直达:输 4 位码回车即取
+    var claim = document.getElementById('claim');
+    var claimgo = document.getElementById('claimgo');
+    function doClaim() {
+      var c = claim.value.trim().toUpperCase();
+      if (!c) return;
+      if (!/^[A-HJKMNP-Z2-9]{4}$/.test(c)) {
+        hint.textContent = '取件码为 4 位,且不含 I/L/O/0/1';
+        return;
+      }
+      location.href = '/r/' + c;
+    }
+    claimgo.addEventListener('click', doClaim);
+    claim.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doClaim();
     });
   </script>
 </body>
@@ -265,7 +286,7 @@ const SEND_HTML = `<!doctype html>
   <p><button id="go" class="btn" type="button">生成取件码</button></p>
   <p id="msg"></p>
   <div id="result" hidden>
-    <p>在另一台设备打开这个链接,或扫码:</p>
+    <p>在另一台设备:打开链接、扫码,或在首页输入取件码:</p>
     <p><a id="claimurl" class="claim" target="_blank" rel="noopener"></a></p>
     <p id="code"></p>
     <p><img id="qr" alt="取件二维码" /></p>
