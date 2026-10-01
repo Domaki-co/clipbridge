@@ -1,9 +1,9 @@
-# QR Generator
+# ClipBridge 文桥
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-> Stateless QR-code generator running on Cloudflare Workers — one source file, zero cost, SVG out.
-> Deploy it once and get `https://qr-generator.<your-subdomain>.workers.dev`, served from edge nodes worldwide.
+> Text sync between your devices, on Cloudflare Workers — QR codes carry text into the phone, claim codes bring it back to the PC. One source file, zero cost.
+> Deploy it once and get `https://qr-generator.<your-subdomain>.workers.dev`, served from edge nodes worldwide (the Worker keeps the name `qr-generator` for compatibility with already-generated codes).
 
 ## Features
 

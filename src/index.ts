@@ -40,7 +40,7 @@ const LANDING_HTML = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>二维码生成器</title>
+  <title>文桥 ClipBridge · 文本同步</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
     [hidden] { display: none !important; }
@@ -63,8 +63,8 @@ const LANDING_HTML = `<!doctype html>
 </head>
 <body>
   <main class="card">
-    <div class="top"><span class="brand"><img src="/favicon.svg" alt="" />二维码生成器</span></div>
-    <h1 class="title">网址 / 文本 → 二维码</h1>
+    <div class="top"><span class="brand"><img src="/favicon.svg" alt="" />文桥 ClipBridge</span></div>
+    <h1 class="title">文本,一扫即传</h1>
     <p><input id="text" type="text" placeholder="输入网址或文本,回车生成" /></p>
     <p id="hint"></p>
     <p><img id="qr" hidden alt="二维码预览" /></p>
@@ -147,7 +147,7 @@ const BRIDGE_HTML_TEMPLATE = `<!doctype html>
 <body>
   <main class="card">
     <div class="top">
-      <a class="brand" href="/"><img src="/favicon.svg" alt="" />二维码生成器</a>
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
       <a class="home" href="/">← 首页</a>
     </div>
     <p><span id="status" class="status">解码中…</span></p>
@@ -310,7 +310,7 @@ const SEND_HTML = `<!doctype html>
 <body>
   <main class="card">
     <div class="top">
-      <a class="brand" href="/"><img src="/favicon.svg" alt="" />二维码生成器</a>
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
       <a class="home" href="/">← 首页</a>
     </div>
     <h1>传文本到其他设备</h1>
@@ -397,7 +397,7 @@ const CLAIM_HTML = `<!doctype html>
 <body>
   <main class="card">
     <div class="top">
-      <a class="brand" href="/"><img src="/favicon.svg" alt="" />二维码生成器</a>
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
       <a class="home" href="/">← 首页</a>
     </div>
     <h1>输入取件码</h1>
@@ -466,7 +466,7 @@ const INVALID_HTML = `<!doctype html>
 <body>
   <main class="card">
     <div class="top">
-      <a class="brand" href="/"><img src="/favicon.svg" alt="" />二维码生成器</a>
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
       <a class="home" href="/">← 首页</a>
     </div>
     <p class="emoji">🤔</p>

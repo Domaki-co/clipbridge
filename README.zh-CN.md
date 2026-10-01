@@ -1,9 +1,9 @@
-# 二维码生成器
+# 文桥 ClipBridge
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-> 跑在 Cloudflare Workers 上的无状态二维码生成服务——单文件、零成本、输出 SVG。
-> 一次部署即得 `https://qr-generator.<你的子域>.workers.dev`,由全球边缘节点就近响应。
+> 跑在 Cloudflare Workers 上的文本同步小工具——二维码把文本带进手机,取件码把它接回电脑;单文件、零成本、默认无状态。
+> 一次部署即得 `https://qr-generator.<你的子域>.workers.dev`,由全球边缘节点就近响应(Worker 服务名沿用 qr-generator,兼容已生成的旧码)。
 
 ## 特性
 
