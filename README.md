@@ -12,7 +12,7 @@
 - **Built-in playground** — visiting the root URL without `?text=` serves a minimal form page
 - **Copy bridge by default** — every code encodes a short link to a transfer page where the scanner chooses to copy, open or share; `mode=text` encodes raw content instead
 - **Claim-code transfer** — `/send` turns pasted text into a 4-character claim code; open `/r/<code>` anywhere to receive it. No camera needed, works in every direction (phone ↔ PC), up to 32 KB, self-destructs after 10 minutes or on first read
-- **Small-file transfer** — the same claim codes carry files up to 25 MB (drag & drop on `/send`); the receiver gets a download page and the code burns on download
+- **Small-file transfer** — the same claim codes carry files up to 25 MB (drag & drop on `/send`); the receiver gets a download page, fully compatible with multi-threaded mobile download managers
 - **Fault-tolerant** — out-of-range numbers are clamped, invalid colors fall back to defaults; bad input never causes a 500
 - **CORS-ready** — `Access-Control-Allow-Origin: *`, so the API can be embedded from any origin
 - **Stateless & free** — no database, KV or R2; runs comfortably inside the Workers free tier
@@ -106,7 +106,7 @@ Scanning needs a camera on the receiving side, which phones have and PCs rarely 
 2. You get a 4-character code (e.g. `K7X2`), a claim URL, and a QR of that URL.
 3. On any other device, reach it any of three ways: open `https://qr.example.com/r/K7X2` directly, scan the QR, or open the claim page at `/r` (linked from the homepage) and type `K7X2` — claiming fires automatically once 4 characters are in.
 
-Notes: the code is stored in Workers KV with a 10-minute TTL and is **deleted on first read** (burn after reading), so a leaked or stale code is worthless. The receiver page is the same bridge page served with the payload inlined — no redirect, no URL-length limits. KV free tier allows 1 000 writes/day, far beyond personal use.
+Notes: the code is stored in Workers KV with a 10-minute TTL. **Text burns on first read**, so a leaked or stale code is worthless. The receiver page is the same bridge page served with the payload inlined — no redirect, no URL-length limits. KV free tier allows 1 000 writes/day, far beyond personal use.
 
 **Files** ride the exact same flow: pick or drop a file on `/send` (up to 25 MB, the KV value limit), and the receiver sees a download page with the file name and size. Files do **not** burn on download — they stay claimable until the 10-minute TTL expires, because mobile download managers fire multi-request patterns (security pre-fetches, `Range: bytes=0-` probes, multi-threaded chunks, retries) that make instant-burn semantics self-defeating. The download route fully supports `Range` (`206 Partial Content`) and `HEAD` so Quark/UC-style managers work, file names and MIME types are preserved (`Content-Disposition` uses RFC 5987 for non-ASCII names), and the anchor carries the `download` attribute. Text keeps its stricter burn-after-read.
 
@@ -160,6 +160,17 @@ Small, deliberate deviations from the original implementation doc:
 1. `@cloudflare/workers-types` is `^5` — the current wrangler v4 declares it as a peer dependency, and the doc's `^4` fails `npm install`.
 2. Text over 2 000 characters returns `400` instead of being silently truncated. The doc asked for both truncation *and* a `400` on 3 000 characters, which contradict each other; the `400` behavior is the safer one for users.
 
+## Testing
+
+The suites in [`tests/`](./tests) are stateful end-to-end tests: they create real transfers in the target's KV (cleaned up by the 10-minute TTL), decode actual QR output with jsQR, and exercise the file byte-for-byte.
+
+```bash
+npm run dev          # terminal 1 — local server on :8787
+npm test             # terminal 2 — all three suites against localhost
+
+BASE=https://your-deployment.example.com npm test   # or point them at any live instance
+```
+
 ## Version
 
 **v1.1.0** (2026-10-01) — small-file transfer: the same claim codes now carry files up to 25 MB (drag & drop on `/send`, download page on the receiver side, burn-on-download).
@@ -170,6 +181,15 @@ Small, deliberate deviations from the original implementation doc:
 - Bridge-by-default codes with a copy / open / share transfer page
 - Claim-code transfers (phone ↔ PC, any direction) backed by Workers KV, 32 KB cap, 10-minute TTL, burn-after-read
 - Bilingual documentation and a custom-domain-ready deployment
+
+## Typical flows
+
+| I want to… | Do this |
+| --- | --- |
+| Send text from PC to phone | Type it on `/`, scan the QR, tap **Copy all** on the phone |
+| Send text from phone to PC | Paste it on `/send`, type the claim code at `/r` on the PC |
+| Send a file either way | Drop it on `/send`, open the claim link on the other device, tap **Download** |
+| Share a Wi-Fi password / contact card | Paste the payload (see formats below), scan — phones parse these natively |
 
 ## License
 
