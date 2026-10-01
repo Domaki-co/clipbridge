@@ -49,35 +49,28 @@ const LANDING_HTML = `<!doctype html>
     .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
     .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
     .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
-    .title { font-size: 1.25rem; margin: .1rem 0 .2rem; }
-    .sub { margin: 0 0 1.1rem; font-size: .85rem; color: #7a8190; }
+    .title { font-size: 1.25rem; margin: .4rem 0 .2rem; }
     p { margin: .6rem 0 0; }
     input[type="text"] { width: 100%; padding: .85rem 1rem; font-size: 1rem; box-sizing: border-box; border: 1px solid #dfe5ee; border-radius: 12px; background: #f8fafd; }
     input[type="text"]:focus { outline: none; border-color: #4a90d9; background: #fff; box-shadow: 0 0 0 3px rgba(74,144,217,.15); }
     #hint { min-height: 1.2em; margin: .55rem 0 0; font-size: .8rem; color: #8a93a3; }
     #qr { margin-top: 1.1rem; width: 240px; max-width: 100%; background: #fff; border: 1px solid #eef1f6; border-radius: 14px; padding: 10px; box-sizing: border-box; box-shadow: 0 8px 24px rgba(23,26,32,.08); }
     code { display: block; margin-top: .7rem; font-size: .78rem; color: #667085; word-break: break-all; }
-    .nav { margin-top: 1.3rem; }
-    .nav a { font-size: .85rem; color: #667085; }
-    .claimbox { margin-top: .9rem; font-size: .9rem; color: #444; }
-    .claimbox input { width: 6.5em; text-align: center; text-transform: uppercase; font-family: ui-monospace, monospace; letter-spacing: .2em; padding: .4rem; font-size: 1rem; border: 1px solid #dfe5ee; border-radius: 10px; }
-    .claimbox input:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 3px rgba(74,144,217,.15); }
-    .claimbox button { padding: .42rem 1.1rem; margin-left: .3rem; border: 0; border-radius: 10px; background: #15181d; color: #fff; cursor: pointer; font-size: .95rem; }
-    .claimbox button:active { transform: scale(.97); }
+    .nav { margin: 1rem 0 0; }
+    .nav a { font-size: .82rem; color: #98a1b0; }
+    .nav a:hover { color: #171a20; }
   </style>
 </head>
 <body>
   <main class="card">
     <div class="top"><span class="brand"><img src="/favicon.svg" alt="" />二维码生成器</span></div>
     <h1 class="title">网址 / 文本 → 二维码</h1>
-    <p class="sub">默认生成复制码,扫码后由对方选择复制或打开</p>
     <p><input id="text" type="text" placeholder="输入网址或文本,回车生成" /></p>
     <p id="hint"></p>
     <p><img id="qr" hidden alt="二维码预览" /></p>
     <code id="link"></code>
-    <p class="claimbox">收到取件码?<input id="claim" placeholder="如 K7X2" maxlength="4" autocomplete="off" /><button id="claimgo" type="button">取件</button></p>
-    <p class="nav"><a href="/send">反向传输?用取件码把文本传到电脑 →</a></p>
   </main>
+  <p class="nav"><a href="/r">取件码取件</a> · <a href="/send">传文本到其他设备</a></p>
   <script>
     var input = document.getElementById('text');
     var img = document.getElementById('qr');
@@ -101,23 +94,6 @@ const LANDING_HTML = `<!doctype html>
       img.src = u.toString();
       img.hidden = false;
       link.textContent = u.toString();
-    });
-
-    // 取件码直达:输 4 位码回车即取
-    var claim = document.getElementById('claim');
-    var claimgo = document.getElementById('claimgo');
-    function doClaim() {
-      var c = claim.value.trim().toUpperCase();
-      if (!c) return;
-      if (!/^[A-HJKMNP-Z2-9]{4}$/.test(c)) {
-        hint.textContent = '取件码为 4 位,且不含 I/L/O/0/1';
-        return;
-      }
-      location.href = '/r/' + c;
-    }
-    claimgo.addEventListener('click', doClaim);
-    claim.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') doClaim();
     });
   </script>
 </body>
@@ -390,6 +366,74 @@ const SEND_HTML = `<!doctype html>
 </body>
 </html>`;
 
+// 取件码输入页:输满 4 位自动取件,回车或按钮亦可
+const CLAIM_HTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>取件码取件</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <style>
+    [hidden] { display: none !important; }
+    body { font-family: system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; margin: 0; padding: 2.5rem 1rem 3rem; color: #171a20; text-align: center; background-color: #f4f6fa; background-image: radial-gradient(720px 320px at 50% -60px, rgba(74,144,217,.16), rgba(74,144,217,0)); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .card { max-width: 430px; margin: 0 auto; background: #fff; border: 1px solid #e9edf4; border-radius: 20px; padding: 1.4rem 1.3rem 1.2rem; box-shadow: 0 12px 40px rgba(23,26,32,.07); }
+    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+    .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
+    .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
+    .home { font-size: .82rem; color: #667085; text-decoration: none; padding: .32rem .75rem; border-radius: 999px; background: #f1f4f9; }
+    .home:hover { background: #e7ecf4; color: #171a20; }
+    h1 { font-size: 1.25rem; margin: .4rem 0 .9rem; }
+    p { margin: .6rem 0 0; }
+    #code { width: 9em; text-align: center; text-transform: uppercase; font-family: ui-monospace, monospace; letter-spacing: .3em; padding: .7rem .5rem .7rem .8em; font-size: 1.5rem; font-weight: 700; border: 1px solid #dfe5ee; border-radius: 14px; background: #f8fafd; }
+    #code:focus { outline: none; border-color: #4a90d9; background: #fff; box-shadow: 0 0 0 3px rgba(74,144,217,.15); }
+    .btn { display: block; width: 100%; margin-top: .9rem; padding: .95rem 0; font-size: 1.02rem; font-weight: 600; border-radius: 12px; border: 0; background: linear-gradient(180deg, #23272f, #15181d); color: #fff; cursor: pointer; transition: transform .06s ease, filter .15s ease; box-shadow: 0 6px 16px rgba(21,24,29,.22); }
+    .btn:active { transform: scale(.985); }
+    .btn:hover { filter: brightness(1.15); }
+    #msg { min-height: 1.3em; margin: .5rem 0 0; font-size: .85rem; color: #b03a2e; }
+    .note { font-size: .8rem; color: #98a1b0; margin: 1rem 0 0; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="top">
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />二维码生成器</a>
+      <a class="home" href="/">← 首页</a>
+    </div>
+    <h1>输入取件码</h1>
+    <p><input id="code" placeholder="如 K7X2" maxlength="4" autocomplete="off" autofocus /></p>
+    <p id="msg"></p>
+    <button id="go" class="btn" type="button">取件</button>
+    <p class="note">取件码 10 分钟内有效,取件即焚(仅能取一次)。</p>
+  </main>
+  <script>
+    var code = document.getElementById('code');
+    var go = document.getElementById('go');
+    var msg = document.getElementById('msg');
+
+    function doClaim() {
+      var c = code.value.trim().toUpperCase();
+      if (!c) { msg.textContent = '请输入取件码'; return; }
+      if (!/^[A-HJKMNP-Z2-9]{4}$/.test(c)) {
+        msg.textContent = '取件码为 4 位,且不含 I/L/O/0/1';
+        return;
+      }
+      location.href = '/r/' + c;
+    }
+
+    code.addEventListener('input', function () {
+      code.value = code.value.toUpperCase().replace(/[^A-HJKMNP-Z2-9]/g, '');
+      msg.textContent = '';
+      if (code.value.length === 4) doClaim(); // 输满 4 位自动取件
+    });
+    code.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doClaim();
+    });
+    go.addEventListener('click', doClaim);
+  </script>
+</body>
+</html>`;
+
 // 取件失败页:取件码无效、已过期或已被取走
 const INVALID_HTML = `<!doctype html>
 <html lang="zh-CN">
@@ -529,6 +573,13 @@ export default {
     // 取件码发送页:任意设备生成取件码,另一台设备凭码取件
     if (url.pathname === '/send') {
       return new Response(SEND_HTML, {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    }
+
+    // 取件码输入页:不带码访问 /r 时
+    if (url.pathname === '/r' || url.pathname === '/r/') {
+      return new Response(CLAIM_HTML, {
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     }

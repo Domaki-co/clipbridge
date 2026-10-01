@@ -88,7 +88,7 @@ Scanning needs a camera on the receiving side, which phones have and PCs rarely 
 
 1. Open `/send`, paste the text (up to 32 KB), tap **生成取件码**.
 2. You get a 4-character code (e.g. `K7X2`), a claim URL, and a QR of that URL.
-3. On any other device, reach it any of three ways: open `https://qr.example.com/r/K7X2` directly, scan the QR, or type `K7X2` into the claim box on the homepage.
+3. On any other device, reach it any of three ways: open `https://qr.example.com/r/K7X2` directly, scan the QR, or open the claim page at `/r` (linked from the homepage) and type `K7X2` — claiming fires automatically once 4 characters are in.
 
 Notes: the code is stored in Workers KV with a 10-minute TTL and is **deleted on first read** (burn after reading), so a leaked or stale code is worthless. The receiver page is the same bridge page served with the payload inlined — no redirect, no URL-length limits. KV free tier allows 1 000 writes/day, far beyond personal use.
 
