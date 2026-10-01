@@ -313,6 +313,7 @@ const SEND_HTML = `<!doctype html>
     #code { font-family: ui-monospace, monospace; font-size: 2rem; letter-spacing: .35em; margin-right: -.35em; font-weight: 700; color: #171a20; background: #f1f5fb; border: 1px dashed #c9d6ea; border-radius: 12px; padding: .6rem 0 .6rem .35em; }
     #qr { margin-top: .9rem; width: 230px; max-width: 100%; background: #fff; border: 1px solid #eef1f6; border-radius: 14px; padding: 10px; box-sizing: border-box; box-shadow: 0 8px 24px rgba(23,26,32,.08); }
     .note { font-size: .8rem; color: #98a1b0; margin: .9rem 0 0; }
+    .devwarn { margin: 0 0 .9rem; padding: .6rem .8rem; background: #fff7e6; border: 1px solid #f0dfb2; border-radius: 10px; font-size: .78rem; color: #8a6d1a; text-align: left; line-height: 1.5; }
     footer { margin-top: 1.4rem; font-size: .85rem; }
     footer a { color: #667085; }
   </style>
@@ -323,6 +324,7 @@ const SEND_HTML = `<!doctype html>
       <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
       <a class="home" href="/">← 首页</a>
     </div>
+    <p id="devwarn" class="devwarn" hidden>⚠️ 本地开发环境:取件数据只存在本机,而取件链接指向线上域名——手机扫码会取不到。完整流程请在 qr.sparkfly.top 上测试。</p>
     <h1>传文本 / 文件到其他设备</h1>
     <p><textarea id="text" placeholder="粘贴要传输的文本,生成取件码后到另一台设备打开取件链接…"></textarea></p>
     <p class="or"><span>或发送文件</span></p>
@@ -344,6 +346,10 @@ const SEND_HTML = `<!doctype html>
     <footer><a href="/">← 返回生成二维码</a></footer>
   </main>
   <script>
+    // 本地 dev 的数据在本地 KV,而取件链接指向线上域名——提前亮警示
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      document.getElementById('devwarn').hidden = false;
+    }
     var text = document.getElementById('text');
     var go = document.getElementById('go');
     var msg = document.getElementById('msg');
