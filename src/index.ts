@@ -499,7 +499,7 @@ const FILE_CLAIM_HTML_TEMPLATE = `<!doctype html>
     <div class="actions">
       <a id="dl" class="btn blue">⬇️ 下载文件</a>
     </div>
-    <p class="note">下载即焚:点击下载后此取件码失效,请保存好文件。</p>
+    <p class="note">完整下载后取件码即失效;未下载的取件码 10 分钟后自动过期。</p>
   </main>
   <script>
     (function () {
@@ -744,23 +744,58 @@ export default {
 
     // 取件:文本 → 取件即焚 + 内联中转页;文件 → 不消费取件码的下载页
     if (url.pathname.startsWith('/r/')) {
-      // 文件字节流:点击下载时才焚毁
+      // 文件字节流:完整交付整个文件时才焚毁;分片/HEAD 请求不焚毁
       if (url.pathname.endsWith('/download')) {
+        if (request.method !== 'GET' && request.method !== 'HEAD') return invalidClaim();
         const dCode = url.pathname.slice(3, -'/download'.length).trim().toUpperCase();
         if (!/^[A-HJKMNP-Z2-9]{4}$/.test(dCode)) return invalidClaim();
         const entry = await env.TRANSFERS.getWithMetadata('t:' + dCode, { type: 'arrayBuffer' });
         if (entry.value === null || (entry.metadata as { kind?: string } | null)?.kind !== 'file') return invalidClaim();
-        await env.TRANSFERS.delete('t:' + dCode);
         const meta = entry.metadata as { name: string; type: string };
         // content-disposition 的 ASCII 回退名:去掉非可打印字符
         const ascii = meta.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') || 'file';
-        return new Response(entry.value, {
-          headers: {
-            'content-type': meta.type,
-            'content-disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(meta.name)}`,
-            'cache-control': 'no-store',
-          },
-        });
+        const total = entry.value.byteLength;
+        const headers: Record<string, string> = {
+          'content-type': meta.type,
+          'content-disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(meta.name)}`,
+          'accept-ranges': 'bytes',
+          'cache-control': 'no-store',
+        };
+        // 解析单区间 Range:多线程下载器(夸克/UC 等)会并发分片请求
+        let start = 0;
+        let end = total - 1;
+        let partial = false;
+        const rangeHdr = request.headers.get('range');
+        const rangeMatch = rangeHdr ? rangeHdr.match(/^bytes=(\d*)-(\d*)$/) : null;
+        if (rangeMatch && (rangeMatch[1] !== '' || rangeMatch[2] !== '')) {
+          partial = true;
+          if (rangeMatch[1] === '') {
+            // bytes=-N:后缀区间
+            start = Math.max(0, total - Number(rangeMatch[2]));
+          } else {
+            start = Number(rangeMatch[1]);
+            end = rangeMatch[2] === '' ? total - 1 : Math.min(Number(rangeMatch[2]), total - 1);
+          }
+          if (start > end || start >= total) {
+            return new Response(null, {
+              status: 416,
+              headers: { 'content-range': `bytes */${total}` },
+            });
+          }
+        }
+        // 焚毁时机:仅当本次响应覆盖整个文件(裸 GET 或全覆盖 Range)。
+        // 分片请求不焚毁,否则多线程下载器会自相残杀;剩余生命周期由 TTL 兜底。
+        const coversAll = start === 0 && end === total - 1;
+        if (coversAll && request.method !== 'HEAD') {
+          await env.TRANSFERS.delete('t:' + dCode);
+        }
+        const slice = partial ? entry.value.slice(start, end + 1) : entry.value;
+        headers['content-length'] = String(end - start + 1);
+        if (partial) headers['content-range'] = `bytes ${start}-${end}/${total}`;
+        if (request.method === 'HEAD') {
+          return new Response(null, { status: partial ? 206 : 200, headers });
+        }
+        return new Response(slice, { status: partial ? 206 : 200, headers });
       }
       const code = url.pathname.slice(3).trim().toUpperCase();
       if (!/^[A-HJKMNP-Z2-9]{4}$/.test(code)) return invalidClaim();

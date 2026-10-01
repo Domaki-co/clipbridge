@@ -108,7 +108,7 @@ Scanning needs a camera on the receiving side, which phones have and PCs rarely 
 
 Notes: the code is stored in Workers KV with a 10-minute TTL and is **deleted on first read** (burn after reading), so a leaked or stale code is worthless. The receiver page is the same bridge page served with the payload inlined — no redirect, no URL-length limits. KV free tier allows 1 000 writes/day, far beyond personal use.
 
-**Files** ride the exact same flow: pick or drop a file on `/send` (up to 25 MB, the KV value limit), and the receiver sees a download page with the file name and size. The claim page can be refreshed freely — the code only burns when the download button is pressed. File names and MIME types are preserved (`Content-Disposition` uses RFC 5987 encoding for non-ASCII names).
+**Files** ride the exact same flow: pick or drop a file on `/send` (up to 25 MB, the KV value limit), and the receiver sees a download page with the file name and size. The claim page can be refreshed freely — the code only burns when the **complete** file has been delivered. Range requests (`206 Partial Content`) and `HEAD` probes are fully supported, so multi-threaded download managers (Quark, UC, etc.) work; a partially downloaded file stays claimable until the 10-minute TTL expires. File names and MIME types are preserved (`Content-Disposition` uses RFC 5987 encoding for non-ASCII names).
 
 ### Handy payload formats
 
