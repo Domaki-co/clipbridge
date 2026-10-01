@@ -497,9 +497,9 @@ const FILE_CLAIM_HTML_TEMPLATE = `<!doctype html>
     <p class="name" id="name"></p>
     <p class="size" id="size"></p>
     <div class="actions">
-      <a id="dl" class="btn blue">⬇️ 下载文件</a>
+      <a id="dl" class="btn blue" download>⬇️ 下载文件</a>
     </div>
-    <p class="note">完整下载后取件码即失效;未下载的取件码 10 分钟后自动过期。</p>
+    <p class="note">取件码 10 分钟内有效,下载完成即焚。</p>
   </main>
   <script>
     (function () {
@@ -783,19 +783,19 @@ export default {
             });
           }
         }
-        // 焚毁时机:仅当本次响应覆盖整个文件(裸 GET 或全覆盖 Range)。
-        // 分片请求不焚毁,否则多线程下载器会自相残杀;剩余生命周期由 TTL 兜底。
-        const coversAll = start === 0 && end === total - 1;
-        if (coversAll && request.method !== 'HEAD') {
+        // 焚毁时机:仅限「无 Range 头的普通 GET」。
+        // 带任何 Range 的请求(探测 bytes=0-、分片、断点续传)一律不焚毁——
+        // 两段式内核先探测后下载、多线程并发分片,都会自相残杀;10 分钟 TTL 兜底。
+        if (request.method === 'GET' && rangeHdr === null) {
           await env.TRANSFERS.delete('t:' + dCode);
         }
         const slice = partial ? entry.value.slice(start, end + 1) : entry.value;
         headers['content-length'] = String(end - start + 1);
         if (partial) headers['content-range'] = `bytes ${start}-${end}/${total}`;
-        if (request.method === 'HEAD') {
-          return new Response(null, { status: partial ? 206 : 200, headers });
-        }
-        return new Response(slice, { status: partial ? 206 : 200, headers });
+        return new Response(request.method === 'HEAD' ? null : slice, {
+          status: partial ? 206 : 200,
+          headers,
+        });
       }
       const code = url.pathname.slice(3).trim().toUpperCase();
       if (!/^[A-HJKMNP-Z2-9]{4}$/.test(code)) return invalidClaim();
