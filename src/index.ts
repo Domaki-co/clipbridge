@@ -104,7 +104,7 @@ const QR_HTML = `<!doctype html>
 </body>
 </html>`;
 
-// 首页:传输文本/文件到其他设备 + 底部输入取件码取件
+// 首页:分段选项卡 (Tab 1: 文本/文件发送; Tab 2: 4位取件码取件)
 const LANDING_HTML = `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -114,114 +114,457 @@ const LANDING_HTML = `<!doctype html>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
     [hidden] { display: none !important; }
-    body { font-family: system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; margin: 0; padding: 2.5rem 1rem 3rem; color: #171a20; text-align: center; background-color: #f4f6fa; background-image: radial-gradient(720px 320px at 50% -60px, rgba(74,144,217,.16), rgba(74,144,217,0)); min-height: 100vh; -webkit-font-smoothing: antialiased; }
-    .card { max-width: 430px; margin: 0 auto; background: #fff; border: 1px solid #e9edf4; border-radius: 20px; padding: 1.4rem 1.3rem 1.2rem; box-shadow: 0 12px 40px rgba(23,26,32,.07); }
-    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-    .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
-    .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
-    h1 { font-size: 1.25rem; margin: .1rem 0 .9rem; }
-    p { margin: .6rem 0 0; }
-    textarea { width: 100%; min-height: 9rem; padding: .8rem 1rem; font-size: 1rem; font-family: inherit; box-sizing: border-box; border: 1px solid #dfe5ee; border-radius: 12px; background: #f8fafd; resize: vertical; }
-    textarea:focus { outline: none; border-color: #4a90d9; background: #fff; box-shadow: 0 0 0 3px rgba(74,144,217,.15); }
-    .btn { display: block; width: 100%; margin-top: .8rem; padding: .95rem 0; font-size: 1.02rem; font-weight: 600; border-radius: 12px; border: 0; background: linear-gradient(180deg, #23272f, #15181d); color: #fff; cursor: pointer; transition: transform .06s ease, filter .15s ease; box-shadow: 0 6px 16px rgba(21,24,29,.22); }
-    .btn:active { transform: scale(.985); }
-    .btn:hover { filter: brightness(1.15); }
-    .btn:disabled { opacity: .5; }
-    #msg { min-height: 1.3em; margin: .5rem 0 0; font-size: .85rem; color: #b03a2e; }
-    #progress { min-height: 1.2em; margin: .5rem 0 0; font-size: .82rem; color: #667085; }
-    .or { display: flex; align-items: center; gap: .8rem; color: #98a1b0; font-size: .8rem; margin: 1.1rem 0 0; }
-    .or::before, .or::after { content: ''; flex: 1; height: 1px; background: #e6eaf1; }
-    .filebox { margin-top: .7rem; }
-    .pickbtn { padding: .55rem 1.1rem; font-size: .9rem; border-radius: 10px; border: 1px dashed #c6cede; background: #f8fafd; color: #444; cursor: pointer; }
-    .pickbtn:hover { border-color: #4a90d9; color: #1668b8; }
-    .chip { display: inline-flex; align-items: center; gap: .5rem; max-width: 100%; padding: .45rem .85rem; background: #f1f5fb; border-radius: 999px; font-size: .85rem; }
-    .chipname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .chip button { border: 0; background: none; cursor: pointer; color: #7a8190; font-size: .9rem; padding: 0; }
-    .step { margin: .2rem 0 0; font-size: .85rem; color: #667085; }
-    a.claim { display: inline-block; margin: .3rem 0; font-size: .9rem; color: #1668b8; word-break: break-all; }
-    #code { font-family: ui-monospace, monospace; font-size: 2rem; letter-spacing: .35em; margin-right: -.35em; font-weight: 700; color: #171a20; background: #f1f5fb; border: 1px dashed #c9d6ea; border-radius: 12px; padding: .6rem 0 .6rem .35em; }
-    #qr { margin-top: .9rem; width: 230px; max-width: 100%; background: #fff; border: 1px solid #eef1f6; border-radius: 14px; padding: 10px; box-sizing: border-box; box-shadow: 0 8px 24px rgba(23,26,32,.08); }
-    .note { font-size: .8rem; color: #98a1b0; margin: .9rem 0 0; }
-    .devwarn { margin: 0 0 .9rem; padding: .6rem .8rem; background: #fff7e6; border: 1px solid #f0dfb2; border-radius: 10px; font-size: .78rem; color: #8a6d1a; text-align: left; line-height: 1.5; }
-    .claimbox { display: flex; gap: .6rem; margin-top: .7rem; }
-    #claimcode {
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      margin: 0;
+      padding: 2.2rem 1rem 3rem;
+      color: #0f172a;
+      text-align: center;
+      background-color: #f6f8fc;
+      background-image:
+        radial-gradient(800px 380px at 50% -80px, rgba(59, 130, 246, 0.15), rgba(59, 130, 246, 0)),
+        radial-gradient(600px 300px at 50% 100%, rgba(203, 213, 225, 0.2), rgba(203, 213, 225, 0));
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .card {
+      max-width: 440px;
+      margin: 0 auto;
+      background: #ffffff;
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      border-radius: 24px;
+      padding: 1.5rem 1.4rem 1.4rem;
+      box-shadow: 0 16px 40px -4px rgba(15, 23, 42, 0.07), 0 4px 12px -2px rgba(15, 23, 42, 0.02);
+      transition: box-shadow 0.2s ease;
+    }
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.15rem;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #0f172a;
+      text-decoration: none;
+      letter-spacing: -0.01em;
+    }
+    .brand img {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      display: block;
+    }
+    .badge {
+      font-size: 0.73rem;
+      color: #64748b;
+      background: #f1f5f9;
+      padding: 0.25rem 0.65rem;
+      border-radius: 999px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+    .tabs {
+      display: flex;
+      background: #f1f5f9;
+      padding: 4px;
+      border-radius: 14px;
+      margin-bottom: 1.25rem;
+      gap: 4px;
+    }
+    .tab-btn {
       flex: 1;
-      min-width: 0;
-      padding: .85rem 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0.65rem 0;
+      font-size: 0.93rem;
+      font-weight: 600;
+      color: #64748b;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.16s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .tab-btn:hover {
+      color: #1e293b;
+    }
+    .tab-btn.active {
+      background: #ffffff;
+      color: #0f172a;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    .tab-icon {
+      font-size: 1rem;
+      line-height: 1;
+    }
+    textarea {
+      width: 100%;
+      min-height: 8.5rem;
+      padding: 0.85rem 1rem;
+      font-size: 0.98rem;
+      font-family: inherit;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #f8fafc;
+      color: #0f172a;
+      resize: vertical;
+      line-height: 1.5;
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: #3b82f6;
+      background: #ffffff;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+    .filebox {
+      margin-top: 0.75rem;
+    }
+    .pickbtn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.72rem 1rem;
+      font-size: 0.88rem;
+      font-weight: 500;
+      border-radius: 12px;
+      border: 1.5px dashed #cbd5e1;
+      background: #f8fafc;
+      color: #475569;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .pickbtn:hover, .pickbtn.dragover {
+      border-color: #3b82f6;
+      background: #eff6ff;
+      color: #1d4ed8;
+    }
+    .pick-limit {
+      font-size: 0.78rem;
+      color: #94a3b8;
+    }
+    .chip {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      width: 100%;
+      padding: 0.6rem 0.9rem;
+      background: #f0f7ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
+      font-size: 0.88rem;
+      color: #1e40af;
+    }
+    .chipname {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-align: left;
+      font-weight: 500;
+    }
+    .chip button {
+      border: 0;
+      background: rgba(30, 64, 175, 0.1);
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      cursor: pointer;
+      color: #1e40af;
+      font-size: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition: background 0.15s;
+    }
+    .chip button:hover {
+      background: rgba(30, 64, 175, 0.2);
+    }
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      width: 100%;
+      margin-top: 0.9rem;
+      padding: 0.9rem 0;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 14px;
+      border: 0;
+      background: linear-gradient(180deg, #1e293b, #0f172a);
+      color: #ffffff;
+      cursor: pointer;
+      transition: transform 0.08s ease, filter 0.15s ease, box-shadow 0.15s ease;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.18);
+    }
+    .btn:active {
+      transform: scale(0.985);
+    }
+    .btn:hover {
+      filter: brightness(1.15);
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.25);
+    }
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    #msg {
+      min-height: 1.3em;
+      margin: 0.5rem 0 0;
+      font-size: 0.85rem;
+      color: #ef4444;
+    }
+    #progress {
+      min-height: 1.2em;
+      margin: 0.4rem 0 0;
+      font-size: 0.82rem;
+      color: #64748b;
+    }
+    .result-card {
+      margin-top: 1.2rem;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      padding: 1.1rem 1rem;
+      text-align: center;
+    }
+    .result-step {
+      font-size: 0.85rem;
+      color: #475569;
+      font-weight: 500;
+      margin: 0 0 0.6rem;
+    }
+    .code-box {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      background: #ffffff;
+      border: 1.5px dashed #93c5fd;
+      border-radius: 12px;
+      padding: 0.45rem 1.1rem;
+      margin-bottom: 0.6rem;
+    }
+    #code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 1.8rem;
+      letter-spacing: 0.25em;
+      margin-right: -0.25em;
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .copy-pill {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #2563eb;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 999px;
+      padding: 0.2rem 0.55rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .copy-pill:hover {
+      background: #dbeafe;
+    }
+    #qr {
+      margin: 0.4rem 0;
+      width: 210px;
+      max-width: 100%;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 8px;
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    }
+    a.claim {
+      display: inline-block;
+      margin: 0.2rem 0;
+      font-size: 0.88rem;
+      color: #2563eb;
+      word-break: break-all;
+      text-decoration: none;
+    }
+    a.claim:hover {
+      text-decoration: underline;
+    }
+    .note {
+      font-size: 0.78rem;
+      color: #94a3b8;
+      margin: 0.7rem 0 0;
+      line-height: 1.45;
+    }
+    .devwarn {
+      margin: 0 0 0.9rem;
+      padding: 0.6rem 0.8rem;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 12px;
+      font-size: 0.78rem;
+      color: #92400e;
+      text-align: left;
+      line-height: 1.5;
+    }
+    .claim-hero {
+      text-align: center;
+      padding: 0.6rem 0 0.2rem;
+    }
+    .claim-icon-large {
+      font-size: 2.2rem;
+      line-height: 1;
+      margin-bottom: 0.4rem;
+    }
+    .claim-title {
       font-size: 1.15rem;
       font-weight: 700;
-      font-family: ui-monospace, monospace;
-      letter-spacing: .25em;
+      color: #0f172a;
+      margin: 0 0 0.3rem;
+    }
+    .claim-desc {
+      font-size: 0.82rem;
+      color: #64748b;
+      margin: 0;
+    }
+    .code-input-wrap {
+      margin: 1.1rem auto 0.4rem;
+      max-width: 250px;
+    }
+    #claimcode {
+      width: 100%;
+      padding: 0.85rem 0.5rem;
+      font-size: 1.7rem;
+      font-weight: 800;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      letter-spacing: 0.3em;
+      text-indent: 0.3em;
       text-transform: uppercase;
       text-align: center;
-      box-sizing: border-box;
-      border: 1px solid #dfe5ee;
-      border-radius: 12px;
-      background: #f8fafd;
+      border: 2px solid #cbd5e1;
+      border-radius: 16px;
+      background: #f8fafc;
+      color: #0f172a;
+      transition: all 0.15s ease;
     }
     #claimcode:focus {
       outline: none;
-      border-color: #4a90d9;
-      background: #fff;
-      box-shadow: 0 0 0 3px rgba(74,144,217,.15);
+      border-color: #3b82f6;
+      background: #ffffff;
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15);
     }
-    .claimbtn {
-      padding: 0 1.4rem;
-      font-size: 1rem;
-      font-weight: 600;
-      border-radius: 12px;
-      border: 0;
-      background: linear-gradient(180deg, #23272f, #15181d);
-      color: #fff;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: transform .06s ease, filter .15s ease;
-      box-shadow: 0 6px 16px rgba(21,24,29,.22);
+    #claimcode::placeholder {
+      color: #cbd5e1;
+      font-weight: 500;
+      letter-spacing: 0.15em;
+      text-indent: 0.15em;
     }
-    .claimbtn:active { transform: scale(.985); }
-    .claimbtn:hover { filter: brightness(1.15); }
-    #claimmsg { min-height: 1.3em; margin: .4rem 0 0; font-size: .85rem; color: #b03a2e; }
-    .nav { margin: 1.2rem 0 0; }
-    .nav a { font-size: .82rem; color: #98a1b0; text-decoration: none; }
-    .nav a:hover { color: #171a20; }
+    #claimmsg {
+      min-height: 1.3em;
+      margin: 0.4rem 0 0;
+      font-size: 0.85rem;
+      color: #ef4444;
+    }
+    .nav {
+      margin: 1.25rem 0 0;
+    }
+    .nav a {
+      font-size: 0.82rem;
+      color: #94a3b8;
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .nav a:hover {
+      color: #1e293b;
+    }
   </style>
 </head>
 <body>
   <main class="card">
     <div class="top">
       <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
+      <span class="badge">免登录 · 阅后即焚</span>
     </div>
     <p id="devwarn" class="devwarn" hidden>⚠️ 本地开发环境:取件数据只存在本机,而取件链接指向线上域名——手机扫码会取不到。完整流程请在线上域名下测试。</p>
-    <h1>传文本 / 文件到其他设备</h1>
-    <p><textarea id="text" placeholder="粘贴要传输的文本,生成取件码后到另一台设备打开取件链接…"></textarea></p>
-    <p class="or"><span>或发送文件</span></p>
-    <div class="filebox" id="filebox">
-      <input type="file" id="file" hidden />
-      <button id="pick" class="pickbtn" type="button">📎 选择文件(≤ 25MB)</button>
-      <span id="chip" class="chip" hidden><span id="chipname" class="chipname"></span><button id="chipx" type="button" aria-label="移除文件">✕</button></span>
+    
+    <div class="tabs" role="tablist">
+      <button class="tab-btn active" id="tab-send" type="button" role="tab" aria-selected="true">
+        <span class="tab-icon">📨</span> 我要发送
+      </button>
+      <button class="tab-btn" id="tab-claim" type="button" role="tab" aria-selected="false">
+        <span class="tab-icon">📥</span> 快速取件
+      </button>
     </div>
-    <p><button id="go" class="btn" type="button">生成取件码</button></p>
-    <p id="progress"></p>
-    <p id="msg"></p>
-    <div id="result" hidden>
-      <p class="step">在另一台设备:打开链接、扫码,或在首页输入取件码:</p>
-      <p><a id="claimurl" class="claim" target="_blank" rel="noopener"></a></p>
-      <p id="code"></p>
-      <p><img id="qr" alt="取件二维码" /></p>
-      <p class="note">取件码 10 分钟内有效;文本取件即焚,文件到期自动销毁。</p>
+
+    <!-- 面板 1: 发送 -->
+    <div id="panel-send">
+      <p><textarea id="text" placeholder="粘贴要传输的文本,生成取件码或二维码..."></textarea></p>
+      <div class="filebox" id="filebox">
+        <input type="file" id="file" hidden />
+        <button id="pick" class="pickbtn" type="button">
+          <span>📎 点击或拖入文件</span>
+          <span class="pick-limit">(≤ 25MB)</span>
+        </button>
+        <div id="chip" class="chip" hidden>
+          <span style="font-size:1.1rem;line-height:1">📄</span>
+          <span id="chipname" class="chipname"></span>
+          <button id="chipx" type="button" aria-label="移除文件">✕</button>
+        </div>
+      </div>
+      <p><button id="go" class="btn" type="button">生成取件码</button></p>
+      <p id="progress"></p>
+      <p id="msg"></p>
+      <div id="result" class="result-card" hidden>
+        <p class="result-step">在另一台设备打开取件链接、扫码或输入码:</p>
+        <div class="code-box">
+          <span id="code"></span>
+          <button id="copy-code-btn" class="copy-pill" type="button">复制</button>
+        </div>
+        <p><img id="qr" alt="取件二维码" /></p>
+        <p><a id="claimurl" class="claim" target="_blank" rel="noopener"></a></p>
+        <p class="note">取件码 10 分钟内有效;文本取件即焚,文件到期自动销毁。</p>
+      </div>
     </div>
-    <p class="or"><span>或输入取件码</span></p>
-    <div class="claimbox">
-      <input id="claimcode" placeholder="4 位取件码" maxlength="4" autocomplete="off" />
-      <button id="claimgo" class="claimbtn" type="button">取件</button>
+
+    <!-- 面板 2: 取件 -->
+    <div id="panel-claim" hidden>
+      <div class="claim-hero">
+        <div class="claim-icon-large">📥</div>
+        <h2 class="claim-title">输入 4 位取件码</h2>
+        <p class="claim-desc">在接收设备输入发送方提供的 4 位代码</p>
+      </div>
+      <div class="code-input-wrap">
+        <input id="claimcode" placeholder="如 K7X2" maxlength="4" autocomplete="off" />
+      </div>
+      <p id="claimmsg"></p>
+      <p><button id="claimgo" class="btn" type="button">立即取件</button></p>
+      <p class="note">取件码 10 分钟内有效;文本阅后即焚(仅可提取一次)。</p>
     </div>
-    <p id="claimmsg"></p>
   </main>
+
   <p class="nav"><a href="/qr">普通二维码生成</a> · <a href="/r">独立取件页</a> · <a href="/send">发送页</a></p>
+
   <script>
     if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
       document.getElementById('devwarn').hidden = false;
     }
+
+    var tabSend = document.getElementById('tab-send');
+    var tabClaim = document.getElementById('tab-claim');
+    var panelSend = document.getElementById('panel-send');
+    var panelClaim = document.getElementById('panel-claim');
+
     var text = document.getElementById('text');
     var go = document.getElementById('go');
     var msg = document.getElementById('msg');
@@ -229,6 +572,7 @@ const LANDING_HTML = `<!doctype html>
     var result = document.getElementById('result');
     var claimurl = document.getElementById('claimurl');
     var code = document.getElementById('code');
+    var copyCodeBtn = document.getElementById('copy-code-btn');
     var qr = document.getElementById('qr');
     var fileInput = document.getElementById('file');
     var pick = document.getElementById('pick');
@@ -236,6 +580,36 @@ const LANDING_HTML = `<!doctype html>
     var chipname = document.getElementById('chipname');
     var filebox = document.getElementById('filebox');
     var currentFile = null;
+
+    var claimCode = document.getElementById('claimcode');
+    var claimGo = document.getElementById('claimgo');
+    var claimMsg = document.getElementById('claimmsg');
+
+    function switchTab(toClaim) {
+      if (toClaim) {
+        tabSend.classList.remove('active');
+        tabSend.setAttribute('aria-selected', 'false');
+        tabClaim.classList.add('active');
+        tabClaim.setAttribute('aria-selected', 'true');
+        panelSend.hidden = true;
+        panelClaim.hidden = false;
+        claimCode.focus();
+      } else {
+        tabClaim.classList.remove('active');
+        tabClaim.setAttribute('aria-selected', 'false');
+        tabSend.classList.add('active');
+        tabSend.setAttribute('aria-selected', 'true');
+        panelClaim.hidden = true;
+        panelSend.hidden = false;
+      }
+    }
+
+    tabSend.addEventListener('click', function () { switchTab(false); });
+    tabClaim.addEventListener('click', function () { switchTab(true); });
+
+    if (location.hash === '#claim' || new URLSearchParams(location.search).get('tab') === 'claim') {
+      switchTab(true);
+    }
 
     function fmtSize(n) {
       if (n >= 1000 * 1000) return (n / 1000 / 1000).toFixed(1) + ' MB';
@@ -246,7 +620,7 @@ const LANDING_HTML = `<!doctype html>
     function setFile(f) {
       currentFile = f || null;
       if (currentFile) {
-        document.getElementById('chipname').textContent = currentFile.name + ' · ' + fmtSize(currentFile.size);
+        chipname.textContent = currentFile.name + ' · ' + fmtSize(currentFile.size);
         chip.hidden = false;
         pick.hidden = true;
       } else {
@@ -259,21 +633,36 @@ const LANDING_HTML = `<!doctype html>
     pick.addEventListener('click', function () { fileInput.click(); });
     fileInput.addEventListener('change', function () { setFile(fileInput.files[0]); });
     document.getElementById('chipx').addEventListener('click', function () { setFile(null); });
+
     document.addEventListener('dragover', function (e) { e.preventDefault(); });
     document.addEventListener('drop', function (e) { e.preventDefault(); });
+    filebox.addEventListener('dragover', function (e) { e.preventDefault(); pick.classList.add('dragover'); });
+    filebox.addEventListener('dragleave', function () { pick.classList.remove('dragover'); });
     filebox.addEventListener('drop', function (e) {
+      e.preventDefault();
+      pick.classList.remove('dragover');
       if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
     });
 
+    var currentRawCode = '';
     function showResult(j) {
       msg.textContent = '';
       progress.textContent = '';
+      currentRawCode = j.code;
       code.textContent = j.code.split('').join(' ');
       claimurl.textContent = j.url;
       claimurl.href = j.url;
       qr.src = '/?text=' + encodeURIComponent(j.url) + '&mode=text';
       result.hidden = false;
     }
+
+    copyCodeBtn.addEventListener('click', function () {
+      if (!currentRawCode || !navigator.clipboard || !navigator.clipboard.writeText) return;
+      navigator.clipboard.writeText(currentRawCode).then(function () {
+        copyCodeBtn.textContent = '已复制 ✓';
+        setTimeout(function () { copyCodeBtn.textContent = '复制'; }, 1500);
+      });
+    });
 
     function uploadFile() {
       var f = currentFile;
@@ -304,7 +693,7 @@ const LANDING_HTML = `<!doctype html>
       xhr.send(f);
     }
 
-    go.addEventListener('click', function () {
+    function doSend() {
       if (currentFile) { uploadFile(); return; }
       var t = text.value.trim();
       if (!t) { msg.textContent = '请先输入内容或选择文件'; return; }
@@ -325,11 +714,12 @@ const LANDING_HTML = `<!doctype html>
         go.disabled = false;
         msg.textContent = '网络错误,请重试';
       });
-    });
+    }
 
-    var claimCode = document.getElementById('claimcode');
-    var claimGo = document.getElementById('claimgo');
-    var claimMsg = document.getElementById('claimmsg');
+    go.addEventListener('click', doSend);
+    text.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') doSend();
+    });
 
     function doClaim() {
       var c = claimCode.value.trim().toUpperCase();
