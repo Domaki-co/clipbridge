@@ -37,9 +37,10 @@ Roll back a bad deploy with `npx wrangler rollback` (deployment history is kept 
 
 | Route | Method | Purpose |
 | --- | --- | --- |
-| `/` | GET | Playground page; with `?text=` returns the SVG QR |
+| `/` | GET | Home transfer and claim page; with `?text=` returns the SVG QR |
+| `/qr` | GET | Standalone QR generator page |
 | `/t?d=…` | GET | Bridge page where a scanned copy-code lands |
-| `/send` | GET | Claim-code sender page |
+| `/send` | GET | Claim-code sender page (matches home page) |
 | `/r` | GET | Claim-code input page (auto-claims at 4 characters) |
 | `/r/:code` | GET | Claim a transfer — text burns on read; files stay claimable until TTL |
 | `/r/:code/download` | GET | Download a claimed file |
@@ -104,7 +105,7 @@ Scanning needs a camera on the receiving side, which phones have and PCs rarely 
 
 1. Open `/send`, paste the text (up to 32 KB), tap **生成取件码**.
 2. You get a 4-character code (e.g. `K7X2`), a claim URL, and a QR of that URL.
-3. On any other device, reach it any of three ways: open `https://qr.example.com/r/K7X2` directly, scan the QR, or open the claim page at `/r` (linked from the homepage) and type `K7X2` — claiming fires automatically once 4 characters are in.
+3. On any other device, reach it any of three ways: open `https://qr.example.com/r/K7X2` directly, scan the QR, or enter `K7X2` directly below the homepage (or at `/r`) — claiming fires automatically once 4 characters are in.
 
 Notes: the code is stored in Workers KV with a 10-minute TTL. **Text burns on first read**, so a leaked or stale code is worthless. The receiver page is the same bridge page served with the payload inlined — no redirect, no URL-length limits. KV free tier allows 1 000 writes/day, far beyond personal use.
 
@@ -186,9 +187,10 @@ BASE=https://your-deployment.example.com npm test   # or point them at any live 
 
 | I want to… | Do this |
 | --- | --- |
-| Send text from PC to phone | Type it on `/`, scan the QR, tap **Copy all** on the phone |
-| Send text from phone to PC | Paste it on `/send`, type the claim code at `/r` on the PC |
-| Send a file either way | Drop it on `/send`, open the claim link on the other device, tap **Download** |
+| Send text from PC to phone | Paste on homepage to generate claim code, scan QR on phone and tap **Copy all** |
+| Send text from phone to PC | Open homepage on phone to send, enter the 4-digit claim code on PC below homepage |
+| Send a file either way | Drop it on homepage / send page, open claim link on the other device and tap **Download** |
+| Generate a plain QR code | Enter text on `/qr` for instant SVG rendering and preview |
 | Share a Wi-Fi password / contact card | Paste the payload (see formats below), scan — phones parse these natively |
 
 ## License

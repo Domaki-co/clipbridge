@@ -73,6 +73,12 @@ check(
 );
 const landing = await fetch(BASE + '/').then((r) => r.text());
 check('使用页含 /send 入口', landing.includes('href="/send"'));
+check('首页含生成取件码功能', landing.includes('生成取件码'));
+check('首页含底部取件码输入框', landing.includes('id="claimcode"'));
+
+const qrRes = await fetch(BASE + '/qr');
+const qrHtml = await qrRes.text();
+check('/qr 页 200 + 二维码生成功能', qrRes.status === 200 && qrHtml.includes('文本,一扫即传'));
 
 console.log(failed ? `\n${failed} 项失败` : '\n全部通过');
 process.exit(failed ? 1 : 0);

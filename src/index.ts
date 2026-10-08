@@ -36,12 +36,12 @@ const MAX_FILE_BYTES = 25 * 1000 * 1000; // KV 单值硬顶 25MiB,留出安全�
 // 无歧义字符表:去掉 I/L/O/0/1,避免手抄混淆
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
-const LANDING_HTML = `<!doctype html>
+const QR_HTML = `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>文桥 ClipBridge · 文本同步</title>
+  <title>文桥 ClipBridge · 二维码生成</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
     [hidden] { display: none !important; }
@@ -50,6 +50,8 @@ const LANDING_HTML = `<!doctype html>
     .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
     .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
     .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
+    .home { font-size: .82rem; color: #667085; text-decoration: none; padding: .32rem .75rem; border-radius: 999px; background: #f1f4f9; }
+    .home:hover { background: #e7ecf4; color: #171a20; }
     .title { font-size: 1.25rem; margin: .4rem 0 .2rem; }
     p { margin: .6rem 0 0; }
     input[type="text"] { width: 100%; padding: .85rem 1rem; font-size: 1rem; box-sizing: border-box; border: 1px solid #dfe5ee; border-radius: 12px; background: #f8fafd; }
@@ -58,27 +60,29 @@ const LANDING_HTML = `<!doctype html>
     #qr { margin-top: 1.1rem; width: 240px; max-width: 100%; background: #fff; border: 1px solid #eef1f6; border-radius: 14px; padding: 10px; box-sizing: border-box; box-shadow: 0 8px 24px rgba(23,26,32,.08); }
     code { display: block; margin-top: .7rem; font-size: .78rem; color: #667085; word-break: break-all; }
     .nav { margin: 1rem 0 0; }
-    .nav a { font-size: .82rem; color: #98a1b0; }
+    .nav a { font-size: .82rem; color: #98a1b0; text-decoration: none; }
     .nav a:hover { color: #171a20; }
   </style>
 </head>
 <body>
   <main class="card">
-    <div class="top"><span class="brand"><img src="/favicon.svg" alt="" />文桥 ClipBridge</span></div>
+    <div class="top">
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
+      <a class="home" href="/">← 首页</a>
+    </div>
     <h1 class="title">文本,一扫即传</h1>
     <p><input id="text" type="text" placeholder="输入网址或文本,回车生成" /></p>
     <p id="hint"></p>
     <p><img id="qr" hidden alt="二维码预览" /></p>
     <code id="link"></code>
   </main>
-  <p class="nav"><a href="/r">取件码取件</a> · <a href="/send">传文本到其他设备</a></p>
+  <p class="nav"><a href="/">← 返回传输首页</a> · <a href="/r">取件码取件</a></p>
   <script>
     var input = document.getElementById('text');
     var img = document.getElementById('qr');
     var link = document.getElementById('link');
     var hint = document.getElementById('hint');
 
-    // 所有码默认经中转页,复制还是打开由扫码的人自己选
     function hintFor(t) {
       return t ? '扫码后可选择:复制全文 / 打开链接 / 分享' : '';
     }
@@ -96,6 +100,256 @@ const LANDING_HTML = `<!doctype html>
       img.hidden = false;
       link.textContent = u.toString();
     });
+  </script>
+</body>
+</html>`;
+
+// 首页:传输文本/文件到其他设备 + 底部输入取件码取件
+const LANDING_HTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>文桥 ClipBridge · 文本同步</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <style>
+    [hidden] { display: none !important; }
+    body { font-family: system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; margin: 0; padding: 2.5rem 1rem 3rem; color: #171a20; text-align: center; background-color: #f4f6fa; background-image: radial-gradient(720px 320px at 50% -60px, rgba(74,144,217,.16), rgba(74,144,217,0)); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .card { max-width: 430px; margin: 0 auto; background: #fff; border: 1px solid #e9edf4; border-radius: 20px; padding: 1.4rem 1.3rem 1.2rem; box-shadow: 0 12px 40px rgba(23,26,32,.07); }
+    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+    .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
+    .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
+    h1 { font-size: 1.25rem; margin: .1rem 0 .9rem; }
+    p { margin: .6rem 0 0; }
+    textarea { width: 100%; min-height: 9rem; padding: .8rem 1rem; font-size: 1rem; font-family: inherit; box-sizing: border-box; border: 1px solid #dfe5ee; border-radius: 12px; background: #f8fafd; resize: vertical; }
+    textarea:focus { outline: none; border-color: #4a90d9; background: #fff; box-shadow: 0 0 0 3px rgba(74,144,217,.15); }
+    .btn { display: block; width: 100%; margin-top: .8rem; padding: .95rem 0; font-size: 1.02rem; font-weight: 600; border-radius: 12px; border: 0; background: linear-gradient(180deg, #23272f, #15181d); color: #fff; cursor: pointer; transition: transform .06s ease, filter .15s ease; box-shadow: 0 6px 16px rgba(21,24,29,.22); }
+    .btn:active { transform: scale(.985); }
+    .btn:hover { filter: brightness(1.15); }
+    .btn:disabled { opacity: .5; }
+    #msg { min-height: 1.3em; margin: .5rem 0 0; font-size: .85rem; color: #b03a2e; }
+    #progress { min-height: 1.2em; margin: .5rem 0 0; font-size: .82rem; color: #667085; }
+    .or { display: flex; align-items: center; gap: .8rem; color: #98a1b0; font-size: .8rem; margin: 1.1rem 0 0; }
+    .or::before, .or::after { content: ''; flex: 1; height: 1px; background: #e6eaf1; }
+    .filebox { margin-top: .7rem; }
+    .pickbtn { padding: .55rem 1.1rem; font-size: .9rem; border-radius: 10px; border: 1px dashed #c6cede; background: #f8fafd; color: #444; cursor: pointer; }
+    .pickbtn:hover { border-color: #4a90d9; color: #1668b8; }
+    .chip { display: inline-flex; align-items: center; gap: .5rem; max-width: 100%; padding: .45rem .85rem; background: #f1f5fb; border-radius: 999px; font-size: .85rem; }
+    .chipname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chip button { border: 0; background: none; cursor: pointer; color: #7a8190; font-size: .9rem; padding: 0; }
+    .step { margin: .2rem 0 0; font-size: .85rem; color: #667085; }
+    a.claim { display: inline-block; margin: .3rem 0; font-size: .9rem; color: #1668b8; word-break: break-all; }
+    #code { font-family: ui-monospace, monospace; font-size: 2rem; letter-spacing: .35em; margin-right: -.35em; font-weight: 700; color: #171a20; background: #f1f5fb; border: 1px dashed #c9d6ea; border-radius: 12px; padding: .6rem 0 .6rem .35em; }
+    #qr { margin-top: .9rem; width: 230px; max-width: 100%; background: #fff; border: 1px solid #eef1f6; border-radius: 14px; padding: 10px; box-sizing: border-box; box-shadow: 0 8px 24px rgba(23,26,32,.08); }
+    .note { font-size: .8rem; color: #98a1b0; margin: .9rem 0 0; }
+    .devwarn { margin: 0 0 .9rem; padding: .6rem .8rem; background: #fff7e6; border: 1px solid #f0dfb2; border-radius: 10px; font-size: .78rem; color: #8a6d1a; text-align: left; line-height: 1.5; }
+    .claimbox { display: flex; gap: .6rem; margin-top: .7rem; }
+    #claimcode {
+      flex: 1;
+      min-width: 0;
+      padding: .85rem 1rem;
+      font-size: 1.15rem;
+      font-weight: 700;
+      font-family: ui-monospace, monospace;
+      letter-spacing: .25em;
+      text-transform: uppercase;
+      text-align: center;
+      box-sizing: border-box;
+      border: 1px solid #dfe5ee;
+      border-radius: 12px;
+      background: #f8fafd;
+    }
+    #claimcode:focus {
+      outline: none;
+      border-color: #4a90d9;
+      background: #fff;
+      box-shadow: 0 0 0 3px rgba(74,144,217,.15);
+    }
+    .claimbtn {
+      padding: 0 1.4rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 12px;
+      border: 0;
+      background: linear-gradient(180deg, #23272f, #15181d);
+      color: #fff;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: transform .06s ease, filter .15s ease;
+      box-shadow: 0 6px 16px rgba(21,24,29,.22);
+    }
+    .claimbtn:active { transform: scale(.985); }
+    .claimbtn:hover { filter: brightness(1.15); }
+    #claimmsg { min-height: 1.3em; margin: .4rem 0 0; font-size: .85rem; color: #b03a2e; }
+    .nav { margin: 1.2rem 0 0; }
+    .nav a { font-size: .82rem; color: #98a1b0; text-decoration: none; }
+    .nav a:hover { color: #171a20; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="top">
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
+    </div>
+    <p id="devwarn" class="devwarn" hidden>⚠️ 本地开发环境:取件数据只存在本机,而取件链接指向线上域名——手机扫码会取不到。完整流程请在线上域名下测试。</p>
+    <h1>传文本 / 文件到其他设备</h1>
+    <p><textarea id="text" placeholder="粘贴要传输的文本,生成取件码后到另一台设备打开取件链接…"></textarea></p>
+    <p class="or"><span>或发送文件</span></p>
+    <div class="filebox" id="filebox">
+      <input type="file" id="file" hidden />
+      <button id="pick" class="pickbtn" type="button">📎 选择文件(≤ 25MB)</button>
+      <span id="chip" class="chip" hidden><span id="chipname" class="chipname"></span><button id="chipx" type="button" aria-label="移除文件">✕</button></span>
+    </div>
+    <p><button id="go" class="btn" type="button">生成取件码</button></p>
+    <p id="progress"></p>
+    <p id="msg"></p>
+    <div id="result" hidden>
+      <p class="step">在另一台设备:打开链接、扫码,或在首页输入取件码:</p>
+      <p><a id="claimurl" class="claim" target="_blank" rel="noopener"></a></p>
+      <p id="code"></p>
+      <p><img id="qr" alt="取件二维码" /></p>
+      <p class="note">取件码 10 分钟内有效;文本取件即焚,文件到期自动销毁。</p>
+    </div>
+    <p class="or"><span>或输入取件码</span></p>
+    <div class="claimbox">
+      <input id="claimcode" placeholder="4 位取件码" maxlength="4" autocomplete="off" />
+      <button id="claimgo" class="claimbtn" type="button">取件</button>
+    </div>
+    <p id="claimmsg"></p>
+  </main>
+  <p class="nav"><a href="/qr">普通二维码生成</a> · <a href="/r">独立取件页</a> · <a href="/send">发送页</a></p>
+  <script>
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      document.getElementById('devwarn').hidden = false;
+    }
+    var text = document.getElementById('text');
+    var go = document.getElementById('go');
+    var msg = document.getElementById('msg');
+    var progress = document.getElementById('progress');
+    var result = document.getElementById('result');
+    var claimurl = document.getElementById('claimurl');
+    var code = document.getElementById('code');
+    var qr = document.getElementById('qr');
+    var fileInput = document.getElementById('file');
+    var pick = document.getElementById('pick');
+    var chip = document.getElementById('chip');
+    var chipname = document.getElementById('chipname');
+    var filebox = document.getElementById('filebox');
+    var currentFile = null;
+
+    function fmtSize(n) {
+      if (n >= 1000 * 1000) return (n / 1000 / 1000).toFixed(1) + ' MB';
+      if (n >= 1000) return (n / 1000).toFixed(1) + ' KB';
+      return n + ' B';
+    }
+
+    function setFile(f) {
+      currentFile = f || null;
+      if (currentFile) {
+        document.getElementById('chipname').textContent = currentFile.name + ' · ' + fmtSize(currentFile.size);
+        chip.hidden = false;
+        pick.hidden = true;
+      } else {
+        fileInput.value = '';
+        chip.hidden = true;
+        pick.hidden = false;
+      }
+    }
+
+    pick.addEventListener('click', function () { fileInput.click(); });
+    fileInput.addEventListener('change', function () { setFile(fileInput.files[0]); });
+    document.getElementById('chipx').addEventListener('click', function () { setFile(null); });
+    document.addEventListener('dragover', function (e) { e.preventDefault(); });
+    document.addEventListener('drop', function (e) { e.preventDefault(); });
+    filebox.addEventListener('drop', function (e) {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+    });
+
+    function showResult(j) {
+      msg.textContent = '';
+      progress.textContent = '';
+      code.textContent = j.code.split('').join(' ');
+      claimurl.textContent = j.url;
+      claimurl.href = j.url;
+      qr.src = '/?text=' + encodeURIComponent(j.url) + '&mode=text';
+      result.hidden = false;
+    }
+
+    function uploadFile() {
+      var f = currentFile;
+      if (f.size > 25 * 1000 * 1000) { msg.textContent = '文件超过 25MB 上限'; return; }
+      go.disabled = true;
+      msg.textContent = '';
+      progress.textContent = '上传中 0%';
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/transfer');
+      xhr.setRequestHeader('content-type', f.type || 'application/octet-stream');
+      try { xhr.setRequestHeader('x-file-name', encodeURIComponent(f.name)); } catch (e) {}
+      xhr.upload.onprogress = function (e) {
+        if (e.lengthComputable) progress.textContent = '上传中 ' + Math.round((e.loaded / e.total) * 100) + '%';
+      };
+      xhr.onload = function () {
+        go.disabled = false;
+        progress.textContent = '';
+        var j = {};
+        try { j = JSON.parse(xhr.responseText); } catch (e) {}
+        if (xhr.status === 200) { showResult(j); }
+        else { msg.textContent = j.error || '上传失败,请重试'; }
+      };
+      xhr.onerror = function () {
+        go.disabled = false;
+        progress.textContent = '';
+        msg.textContent = '网络错误,请重试';
+      };
+      xhr.send(f);
+    }
+
+    go.addEventListener('click', function () {
+      if (currentFile) { uploadFile(); return; }
+      var t = text.value.trim();
+      if (!t) { msg.textContent = '请先输入内容或选择文件'; return; }
+      if (new TextEncoder().encode(t).length > 32768) { msg.textContent = '内容超过 32KB 上限'; return; }
+      go.disabled = true;
+      msg.textContent = '生成中…';
+      fetch('/api/transfer', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: t })
+      }).then(function (r) {
+        return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+      }).then(function (res) {
+        go.disabled = false;
+        if (!res.ok) { msg.textContent = res.j.error || '生成失败,请重试'; return; }
+        showResult(res.j);
+      }, function () {
+        go.disabled = false;
+        msg.textContent = '网络错误,请重试';
+      });
+    });
+
+    var claimCode = document.getElementById('claimcode');
+    var claimGo = document.getElementById('claimgo');
+    var claimMsg = document.getElementById('claimmsg');
+
+    function doClaim() {
+      var c = claimCode.value.trim().toUpperCase();
+      if (!c) { claimMsg.textContent = '请输入取件码'; return; }
+      if (!/^[A-HJKMNP-Z2-9]{4}$/.test(c)) {
+        claimMsg.textContent = '取件码为 4 位,且不含 I/L/O/0/1';
+        return;
+      }
+      location.href = '/r/' + c;
+    }
+
+    claimCode.addEventListener('input', function () {
+      claimCode.value = claimCode.value.toUpperCase().replace(/[^A-HJKMNP-Z2-9]/g, '');
+      claimMsg.textContent = '';
+      if (claimCode.value.length === 4) doClaim();
+    });
+    claimCode.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doClaim();
+    });
+    claimGo.addEventListener('click', doClaim);
   </script>
 </body>
 </html>`;
@@ -273,192 +527,8 @@ const BRIDGE_HTML_TEMPLATE = `<!doctype html>
 </body>
 </html>`;
 
-// 取件码发送页:输入文本 → 生成 4 位取件码 + 取件链接 + 取件二维码
-const SEND_HTML = `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>传文本到其他设备</title>
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <style>
-    [hidden] { display: none !important; }
-    body { font-family: system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; margin: 0; padding: 2.5rem 1rem 3rem; color: #171a20; text-align: center; background-color: #f4f6fa; background-image: radial-gradient(720px 320px at 50% -60px, rgba(74,144,217,.16), rgba(74,144,217,0)); min-height: 100vh; -webkit-font-smoothing: antialiased; }
-    .card { max-width: 430px; margin: 0 auto; background: #fff; border: 1px solid #e9edf4; border-radius: 20px; padding: 1.4rem 1.3rem 1.2rem; box-shadow: 0 12px 40px rgba(23,26,32,.07); }
-    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-    .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
-    .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
-    .home { font-size: .82rem; color: #667085; text-decoration: none; padding: .32rem .75rem; border-radius: 999px; background: #f1f4f9; }
-    .home:hover { background: #e7ecf4; color: #171a20; }
-    h1 { font-size: 1.25rem; margin: .1rem 0 .9rem; }
-    p { margin: .6rem 0 0; }
-    textarea { width: 100%; min-height: 9rem; padding: .8rem 1rem; font-size: 1rem; font-family: inherit; box-sizing: border-box; border: 1px solid #dfe5ee; border-radius: 12px; background: #f8fafd; resize: vertical; }
-    textarea:focus { outline: none; border-color: #4a90d9; background: #fff; box-shadow: 0 0 0 3px rgba(74,144,217,.15); }
-    .btn { display: block; width: 100%; margin-top: .8rem; padding: .95rem 0; font-size: 1.02rem; font-weight: 600; border-radius: 12px; border: 0; background: linear-gradient(180deg, #23272f, #15181d); color: #fff; cursor: pointer; transition: transform .06s ease, filter .15s ease; box-shadow: 0 6px 16px rgba(21,24,29,.22); }
-    .btn:active { transform: scale(.985); }
-    .btn:hover { filter: brightness(1.15); }
-    .btn:disabled { opacity: .5; }
-    #msg { min-height: 1.3em; margin: .5rem 0 0; font-size: .85rem; color: #b03a2e; }
-    #progress { min-height: 1.2em; margin: .5rem 0 0; font-size: .82rem; color: #667085; }
-    .or { display: flex; align-items: center; gap: .8rem; color: #98a1b0; font-size: .8rem; margin: 1.1rem 0 0; }
-    .or::before, .or::after { content: ''; flex: 1; height: 1px; background: #e6eaf1; }
-    .filebox { margin-top: .7rem; }
-    .pickbtn { padding: .55rem 1.1rem; font-size: .9rem; border-radius: 10px; border: 1px dashed #c6cede; background: #f8fafd; color: #444; cursor: pointer; }
-    .pickbtn:hover { border-color: #4a90d9; color: #1668b8; }
-    .chip { display: inline-flex; align-items: center; gap: .5rem; max-width: 100%; padding: .45rem .85rem; background: #f1f5fb; border-radius: 999px; font-size: .85rem; }
-    .chipname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .chip button { border: 0; background: none; cursor: pointer; color: #7a8190; font-size: .9rem; padding: 0; }
-    .step { margin: .2rem 0 0; font-size: .85rem; color: #667085; }
-    a.claim { display: inline-block; margin: .3rem 0; font-size: .9rem; color: #1668b8; word-break: break-all; }
-    #code { font-family: ui-monospace, monospace; font-size: 2rem; letter-spacing: .35em; margin-right: -.35em; font-weight: 700; color: #171a20; background: #f1f5fb; border: 1px dashed #c9d6ea; border-radius: 12px; padding: .6rem 0 .6rem .35em; }
-    #qr { margin-top: .9rem; width: 230px; max-width: 100%; background: #fff; border: 1px solid #eef1f6; border-radius: 14px; padding: 10px; box-sizing: border-box; box-shadow: 0 8px 24px rgba(23,26,32,.08); }
-    .note { font-size: .8rem; color: #98a1b0; margin: .9rem 0 0; }
-    .devwarn { margin: 0 0 .9rem; padding: .6rem .8rem; background: #fff7e6; border: 1px solid #f0dfb2; border-radius: 10px; font-size: .78rem; color: #8a6d1a; text-align: left; line-height: 1.5; }
-    footer { margin-top: 1.4rem; font-size: .85rem; }
-    footer a { color: #667085; }
-  </style>
-</head>
-<body>
-  <main class="card">
-    <div class="top">
-      <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
-      <a class="home" href="/">← 首页</a>
-    </div>
-    <p id="devwarn" class="devwarn" hidden>⚠️ 本地开发环境:取件数据只存在本机,而取件链接指向线上域名——手机扫码会取不到。完整流程请在线上域名下测试。</p>
-    <h1>传文本 / 文件到其他设备</h1>
-    <p><textarea id="text" placeholder="粘贴要传输的文本,生成取件码后到另一台设备打开取件链接…"></textarea></p>
-    <p class="or"><span>或发送文件</span></p>
-    <div class="filebox" id="filebox">
-      <input type="file" id="file" hidden />
-      <button id="pick" class="pickbtn" type="button">📎 选择文件(≤ 25MB)</button>
-      <span id="chip" class="chip" hidden><span id="chipname" class="chipname"></span><button id="chipx" type="button" aria-label="移除文件">✕</button></span>
-    </div>
-    <p><button id="go" class="btn" type="button">生成取件码</button></p>
-    <p id="progress"></p>
-    <p id="msg"></p>
-    <div id="result" hidden>
-      <p class="step">在另一台设备:打开链接、扫码,或在首页输入取件码:</p>
-      <p><a id="claimurl" class="claim" target="_blank" rel="noopener"></a></p>
-      <p id="code"></p>
-      <p><img id="qr" alt="取件二维码" /></p>
-      <p class="note">取件码 10 分钟内有效;文本取件即焚,文件在下载后焚毁。</p>
-    </div>
-    <footer><a href="/">← 返回生成二维码</a></footer>
-  </main>
-  <script>
-    // 本地 dev 的数据在本地 KV,而取件链接指向线上域名——提前亮警示
-    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-      document.getElementById('devwarn').hidden = false;
-    }
-    var text = document.getElementById('text');
-    var go = document.getElementById('go');
-    var msg = document.getElementById('msg');
-    var progress = document.getElementById('progress');
-    var result = document.getElementById('result');
-    var claimurl = document.getElementById('claimurl');
-    var code = document.getElementById('code');
-    var qr = document.getElementById('qr');
-    var fileInput = document.getElementById('file');
-    var pick = document.getElementById('pick');
-    var chip = document.getElementById('chip');
-    var chipname = document.getElementById('chipname');
-    var filebox = document.getElementById('filebox');
-    var currentFile = null;
-
-    function fmtSize(n) {
-      if (n >= 1000 * 1000) return (n / 1000 / 1000).toFixed(1) + ' MB';
-      if (n >= 1000) return (n / 1000).toFixed(1) + ' KB';
-      return n + ' B';
-    }
-
-    function setFile(f) {
-      currentFile = f || null;
-      if (currentFile) {
-        document.getElementById('chipname').textContent = currentFile.name + ' · ' + fmtSize(currentFile.size);
-        chip.hidden = false;
-        pick.hidden = true;
-      } else {
-        fileInput.value = '';
-        chip.hidden = true;
-        pick.hidden = false;
-      }
-    }
-
-    pick.addEventListener('click', function () { fileInput.click(); });
-    fileInput.addEventListener('change', function () { setFile(fileInput.files[0]); });
-    document.getElementById('chipx').addEventListener('click', function () { setFile(null); });
-    // 拖拽:防止浏览器直接打开文件,只接收第一个文件
-    document.addEventListener('dragover', function (e) { e.preventDefault(); });
-    document.addEventListener('drop', function (e) { e.preventDefault(); });
-    filebox.addEventListener('drop', function (e) {
-      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
-    });
-
-    function showResult(j) {
-      msg.textContent = '';
-      progress.textContent = '';
-      code.textContent = j.code.split('').join(' ');
-      claimurl.textContent = j.url;
-      claimurl.href = j.url;
-      // 取件链接本身作为码内容直出(mode=text),扫码即达取件页
-      qr.src = '/?text=' + encodeURIComponent(j.url) + '&mode=text';
-      result.hidden = false;
-    }
-
-    function uploadFile() {
-      var f = currentFile;
-      if (f.size > 25 * 1000 * 1000) { msg.textContent = '文件超过 25MB 上限'; return; }
-      go.disabled = true;
-      msg.textContent = '';
-      progress.textContent = '上传中 0%';
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/transfer');
-      xhr.setRequestHeader('content-type', f.type || 'application/octet-stream');
-      try { xhr.setRequestHeader('x-file-name', encodeURIComponent(f.name)); } catch (e) {}
-      xhr.upload.onprogress = function (e) {
-        if (e.lengthComputable) progress.textContent = '上传中 ' + Math.round((e.loaded / e.total) * 100) + '%';
-      };
-      xhr.onload = function () {
-        go.disabled = false;
-        progress.textContent = '';
-        var j = {};
-        try { j = JSON.parse(xhr.responseText); } catch (e) {}
-        if (xhr.status === 200) { showResult(j); }
-        else { msg.textContent = j.error || '上传失败,请重试'; }
-      };
-      xhr.onerror = function () {
-        go.disabled = false;
-        progress.textContent = '';
-        msg.textContent = '网络错误,请重试';
-      };
-      xhr.send(f);
-    }
-
-    go.addEventListener('click', function () {
-      if (currentFile) { uploadFile(); return; }
-      var t = text.value.trim();
-      if (!t) { msg.textContent = '请先输入内容或选择文件'; return; }
-      if (new TextEncoder().encode(t).length > 32768) { msg.textContent = '内容超过 32KB 上限'; return; }
-      go.disabled = true;
-      msg.textContent = '生成中…';
-      fetch('/api/transfer', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: t })
-      }).then(function (r) {
-        return r.json().then(function (j) { return { ok: r.ok, j: j }; });
-      }).then(function (res) {
-        go.disabled = false;
-        if (!res.ok) { msg.textContent = res.j.error || '生成失败,请重试'; return; }
-        showResult(res.j);
-      }, function () {
-        go.disabled = false;
-        msg.textContent = '网络错误,请重试';
-      });
-    });
-  </script>
-</body>
-</html>`;
+// 取件码发送页:与首页共用传输与取件界面
+const SEND_HTML = LANDING_HTML;
 
 // 文件取件页:展示文件名/大小,下载按钮指向 /r/:code/download(下载即焚)。
 // __META__ 注入 {name,size,url},文件名一律 textContent 渲染,防 XSS。
@@ -732,6 +802,13 @@ export default {
     // 复制中转页:扫码侧落地,内容自携带于查询参数
     if (url.pathname === '/t') {
       return bridgeResponse(bridgeHtml(null));
+    }
+
+    // 普通二维码生成页:纯前端实时出码
+    if (url.pathname === '/qr') {
+      return new Response(QR_HTML, {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
     }
 
     // 取件码发送页:任意设备生成取件码,另一台设备凭码取件
