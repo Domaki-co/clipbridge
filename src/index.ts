@@ -1071,27 +1071,23 @@ const INVALID_HTML = `<!doctype html>
     .emoji { font-size: 2.4rem; margin: .6rem 0 0; }
     h1 { font-size: 1.25rem; margin: .5rem 0 .4rem; }
     p { margin: .45rem 0 0; font-size: .95rem; color: #5b6472; }
-    .actions { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.2rem; }
-    .btn { display: flex; align-items: center; justify-content: center; gap: .45rem; width: 100%; padding: .95rem 0; font-size: 1.02rem; font-weight: 600; border-radius: 12px; border: 0; cursor: pointer; text-decoration: none; transition: transform .06s ease, filter .15s ease; }
+    .actions { margin-top: 1.4rem; }
+    .btn { display: flex; align-items: center; justify-content: center; gap: .45rem; width: 100%; padding: .95rem 0; font-size: 1.02rem; font-weight: 600; border-radius: 12px; border: 0; cursor: pointer; text-decoration: none; transition: transform .06s ease, filter .15s ease; box-sizing: border-box; }
     .btn:active { transform: scale(.985); }
-    a.btn.blue { background: linear-gradient(180deg, #57a0f5, #3d7ef0); color: #fff; box-shadow: 0 6px 16px rgba(61,126,240,.28); }
-    a.btn.blue:hover { filter: brightness(1.06); }
-    .btn.plain { background: #fff; border: 1px solid #dfe5ee; color: #333; }
-    .btn.plain:hover { background: #f6f8fc; }
+    a.btn.primary { background: linear-gradient(180deg, #1e293b, #0f172a); color: #fff; box-shadow: 0 4px 14px rgba(15,23,42,.18); }
+    a.btn.primary:hover { filter: brightness(1.15); }
   </style>
 </head>
 <body>
   <main class="card">
     <div class="top">
       <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
-      <a class="home" href="/">← 首页</a>
     </div>
     <p class="emoji">🤔</p>
     <h1>取件码无效或已过期</h1>
     <p>取件码 10 分钟内有效,且取件即焚(仅能取一次)。<br />请让发送方重新生成一个。</p>
     <div class="actions">
-      <a class="btn blue" href="/send">📨 去发送页</a>
-      <a class="btn plain" href="/">返回首页</a>
+      <a class="btn primary" href="/">返回首页</a>
     </div>
   </main>
 </body>
