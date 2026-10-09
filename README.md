@@ -15,8 +15,9 @@
 - **Small-file transfer** — the same claim codes carry files up to 25 MB (drag & drop on `/send`); the receiver gets a download page, fully compatible with multi-threaded mobile download managers
 - **One-tap copy-link button** — the sender's result card copies the claim URL to the clipboard with **🔗 复制取件链接**, ready to paste into a chat; you never have to open the link yourself (opening it consumes the text claim). Falls back to `document.execCommand` without the Clipboard API, and always gives visible feedback
 - **Fault-tolerant** — out-of-range numbers are clamped, invalid colors fall back to defaults; bad input never causes a 500
+- **Clipboard channel** — `/c` pairs two devices once (scan the QR), then they share a persistent clipboard: whatever either side sends appears on the other within ~4 seconds, text or files, no claim code to retype. Keeps the 20 most recent items for 24 hours
 - **CORS-ready** — `Access-Control-Allow-Origin: *`, so the API can be embedded from any origin
-- **Stateless & free** — no database, KV or R2; runs comfortably inside the Workers free tier
+- **No moving parts** — the only state is Workers KV (claim codes and channel items): no database, no R2, no Durable Objects. Runs comfortably inside the Workers free tier
 
 ## Quick Start
 
@@ -45,7 +46,13 @@ Roll back a bad deploy with `npx wrangler rollback` (deployment history is kept 
 | `/r` | GET | Claim-code input page (auto-claims at 4 characters) |
 | `/r/:code` | GET | Claim a transfer — text burns on read; files stay claimable until TTL |
 | `/r/:code/download` | GET | Download a claimed file |
+| `/c` | GET | Clipboard-channel pairing page (create or join) |
+| `/c/:code` | GET | Clipboard-channel room — scanning the QR pairs the device automatically |
+| `/c/:code/e/:id` | GET | Raw text or file download for one channel item |
 | `/api/transfer` | POST | Create a transfer — JSON body for text, raw bytes + `x-file-name` header for files |
+| `/api/channel` | POST | Create a channel (`{"action":"create"}`) or send to it (JSON `{"action":"send",…}` / raw bytes + `x-channel-code`) |
+| `/api/channel/:code` | GET | Poll a channel — `?since=<seq>` returns only newer items |
+| `/api/channel/:code` | DELETE | Destroy a channel and every payload it still indexes |
 | `/favicon.svg` | GET | Site icon |
 
 ### QR generation
@@ -112,6 +119,23 @@ Notes: the code is stored in Workers KV with a 10-minute TTL. **Text burns on fi
 
 **Files** ride the exact same flow: pick or drop a file on `/send` (up to 25 MB, the KV value limit), and the receiver sees a download page with the file name and size. Files do **not** burn on download — they stay claimable until the 10-minute TTL expires, because mobile download managers fire multi-request patterns (security pre-fetches, `Range: bytes=0-` probes, multi-threaded chunks, retries) that make instant-burn semantics self-defeating. The download route fully supports `Range` (`206 Partial Content`) and `HEAD` so Quark/UC-style managers work, file names and MIME types are preserved (`Content-Disposition` uses RFC 5987 for non-ASCII names), and the anchor carries the `download` attribute. Text keeps its stricter burn-after-read.
 
+### Clipboard channel (pair once, then stop retyping codes)
+
+Claim codes are perfect for one-off transfers, but sending five things in a row means reading out five codes. A **clipboard channel** is a small paired room instead:
+
+1. Open `/c` on the device you have in hand, tap **创建新频道** (create channel). You get an 8-character code and a QR.
+2. Scan that QR with the other device (or paste the code / the `/c/<code>` link into its browser once). Both ends now remember the channel in `localStorage`.
+3. From then on: paste text and tap **发送**, or pick a file — it shows up on the other device within about 4 seconds, with a **📋 复制** button that puts the text on that device's system clipboard. Send in either direction; both ends poll the same room.
+
+Notes:
+
+- The room keeps the **20 most recent items for 24 hours** (each new item refreshes the clock) and the server holds a short preview (≤120 characters) plus a pointer per item — the full text or file is fetched per item when you open or copy it, which keeps polling cheap. Text sent to a channel does **not** burn on read, unlike a claim code.
+- Nothing is ever copied to your clipboard silently. Browsers (iOS Safari especially) only allow clipboard writes inside a real tap, so the copy button prefetches its payload and copies synchronously when tapped.
+- Two devices sending in the same second can very occasionally lose one item (KV reads and writes are eventually consistent and not transactional) — the room is a convenience channel, not a sync engine. Keep using claim codes for anything you cannot afford to lose.
+- **离开** (leave) only forgets the channel on this device; **销毁频道** (destroy) deletes it for both, including the payloads it still indexes. Items pushed out of the 20-item window stop being reachable from the room but their KV entries can linger until the 24-hour TTL.
+- Channel codes are 8 characters from the same unambiguous alphabet as claim codes (`A–Z` minus `I`, `L`, `O` and digits `0`, `1`), so they are readable aloud and never collide with the 4-character claim space (separate KV key prefix `c:` vs `t:` — the existing flows are untouched).
+- Polling costs roughly 1 read per device per interval (`~900/hour` at 4 s), well under the KV free tier; a busy room is still one key, so it never touches the 1 000 list/day budget.
+
 ### Handy payload formats
 
 ```text
@@ -147,10 +171,12 @@ BEGIN:VCARD%0AVERSION:3.0%0AFN:Jane%0ATEL:+8613800000000%0AEND:VCARD
 
 ```text
 qr-generator/
-├── src/index.ts      # the entire service: parse params → uqr renderSVG / bridge page → respond
+├── src/index.ts      # the entire service: parse params → uqr renderSVG / bridge page / channel page → respond
 ├── wrangler.jsonc    # Worker configuration
 ├── package.json
 ├── tsconfig.json
+├── docs/             # design notes: clipboard-share-plan.md compares the channel options
+├── tests/            # end-to-end suites (transfer, file, regression, channel)
 ├── README.md         # this file
 └── README.zh-CN.md   # Chinese documentation
 ```
@@ -168,12 +194,14 @@ The suites in [`tests/`](./tests) are stateful end-to-end tests: they create rea
 
 ```bash
 npm run dev          # terminal 1 — local server on :8787
-npm test             # terminal 2 — all three suites against localhost
+npm test             # terminal 2 — all four suites against localhost
 
 BASE=https://your-deployment.example.com npm test   # or point them at any live instance
 ```
 
 ## Version
+
+**v1.2.0** (2026-10-09) — clipboard channel: `/c` pairs two devices once and then syncs text and files between them without any claim code (8-character channel code, QR pairing, 20-item / 24-hour room in Workers KV, ~4 s polling, per-item copy button; the existing claim-code and file flows are unchanged).
 
 **v1.1.1** (2026-10-09) — copy-link button: the sender's result card copies the claim URL in one tap (Clipboard API with an `execCommand` fallback and visible button feedback).
 
@@ -194,6 +222,8 @@ BASE=https://your-deployment.example.com npm test   # or point them at any live 
 | Send the claim link to someone | Generate on homepage, tap **🔗 复制取件链接** on the result card, paste it into any chat |
 | Send text from phone to PC | Open homepage on phone to send, enter the 4-digit claim code on PC below homepage |
 | Send a file either way | Drop it on homepage / send page, open claim link on the other device and tap **Download** |
+| Move things back and forth all day (same two devices) | Open `/c` once on both and scan the QR — afterwards paste and tap **发送**, the other device picks it up in ~4 s |
+| Reuse a clipboard channel in a group | Create the channel, share the `/c/<code>` link or QR — everyone who opens it joins the same room |
 | Generate a plain QR code | Enter text on `/qr` for instant SVG rendering and preview |
 | Share a Wi-Fi password / contact card | Paste the payload (see formats below), scan — phones parse these natively |
 

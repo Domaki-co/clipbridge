@@ -36,6 +36,17 @@ const MAX_FILE_BYTES = 25 * 1000 * 1000; // KV 单值硬顶 25MiB,留出安全�
 // 无歧义字符表:去掉 I/L/O/0/1,避免手抄混淆
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
+// 剪贴板频道(常驻):配对一次后两端免输码,内容保留 24 小时、每次写入续期。
+// 与一次性取件码完全并行的链路:独立键前缀 c:,不触碰 t: 的焚毁语义。
+const CHANNEL_TTL_SECONDS = 86400;
+const CHANNEL_CODE_LENGTH = 8;
+// 频道码是长期凭证(不会用一次就换),所以位数多于 4 位取件码
+const CHANNEL_CODE_RE = /^[A-HJKMNP-Z2-9]{8}$/;
+const CHANNEL_MAX_ITEMS = 20; // 索引只保留最近 20 条,更早的正文随 TTL 自行过期
+const CHANNEL_PREVIEW_CHARS = 120; // 索引里只放预览,正文/文件各存独立键
+const CHANNEL_PREFIX = 'c:';
+const CHANNEL_PAYLOAD_SEP = ':e:';
+
 const QR_HTML = `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -572,7 +583,7 @@ const LANDING_HTML = `<!doctype html>
     </div>
   </main>
 
-  <p class="nav"><a href="/qr">普通二维码生成</a> · <a href="/r">独立取件页</a> · <a href="/send">发送页</a></p>
+  <p class="nav"><a href="/qr">普通二维码生成</a> · <a href="/r">独立取件页</a> · <a href="/send">发送页</a> · <a href="/c">剪贴板频道</a></p>
 
   <script>
     if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
@@ -1156,6 +1167,489 @@ const INVALID_HTML = `<!doctype html>
 </body>
 </html>`;
 
+// 剪贴板频道页:配一次、以后免输码。__CHANNEL__ 注入频道码(或 null)。
+// 服务端只发元数据,正文/文件按 id 单独取:轮询体积小,列表再长也不拖慢。
+const CHANNEL_HTML_TEMPLATE = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>剪贴板频道</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <style>
+    [hidden] { display: none !important; }
+    body { font-family: system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; margin: 0; padding: 2rem 1rem 3rem; color: #171a20; background-color: #f4f6fa; background-image: radial-gradient(720px 320px at 50% -60px, rgba(74,144,217,.16), rgba(74,144,217,0)); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .card { max-width: 480px; margin: 0 auto; background: #fff; border: 1px solid #e9edf4; border-radius: 20px; padding: 1.4rem 1.3rem 1.3rem; box-shadow: 0 12px 40px rgba(23,26,32,.07); }
+    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+    .brand { display: flex; align-items: center; gap: .45rem; font-size: .9rem; font-weight: 600; color: #171a20; text-decoration: none; }
+    .brand img { width: 20px; height: 20px; border-radius: 5px; display: block; }
+    .home { font-size: .82rem; color: #667085; text-decoration: none; padding: .32rem .75rem; border-radius: 999px; background: #f1f4f9; }
+    .home:hover { background: #e7ecf4; color: #171a20; }
+    h1 { font-size: 1.3rem; margin: .2rem 0 .5rem; }
+    p { margin: .6rem 0 0; }
+    .sub { font-size: .88rem; color: #667085; line-height: 1.5; }
+    .btn { display: flex; align-items: center; justify-content: center; gap: .45rem; width: 100%; margin-top: .9rem; padding: .95rem 0; font-size: 1.02rem; font-weight: 600; border-radius: 12px; border: 0; cursor: pointer; text-decoration: none; box-sizing: border-box; transition: transform .06s ease, filter .15s ease; }
+    .btn:active { transform: scale(.985); }
+    .btn:disabled { opacity: .6; cursor: not-allowed; }
+    .btn.primary { background: linear-gradient(180deg, #23272f, #15181d); color: #fff; box-shadow: 0 6px 16px rgba(21,24,29,.22); }
+    .btn.primary:hover:not(:disabled) { filter: brightness(1.15); }
+    .btn.quiet { background: #fff; border: 1.5px solid #bfdbfe; color: #1d4ed8; box-shadow: 0 2px 10px rgba(37,99,235,.08); }
+    .btn.quiet:hover:not(:disabled) { background: #eff6ff; }
+    .btn.mini { width: auto; margin: 0; padding: .5rem .8rem; font-size: .85rem; border-radius: 10px; background: #f1f4f9; color: #171a20; }
+    .btn.mini:hover:not(:disabled) { background: #e7ecf4; }
+    .btn.mini.copied { background: #ecfdf5; color: #047857; }
+    .or { display: flex; align-items: center; gap: .6rem; margin: 1.1rem 0 .6rem; font-size: .8rem; color: #98a1b0; }
+    .or::before, .or::after { content: ""; flex: 1; height: 1px; background: #eef1f6; }
+    input[type="text"] { width: 100%; box-sizing: border-box; text-align: center; text-transform: uppercase; font-family: ui-monospace, monospace; letter-spacing: .24em; padding: .75rem .5rem .75rem .7rem; font-size: 1.15rem; font-weight: 700; border: 1px solid #dfe5ee; border-radius: 14px; background: #f8fafd; }
+    input[type="text"]:focus { outline: none; border-color: #4a90d9; background: #fff; box-shadow: 0 0 0 3px rgba(74,144,217,.15); }
+    textarea { width: 100%; box-sizing: border-box; min-height: 5.4rem; resize: vertical; padding: .8rem .9rem; font: inherit; font-size: .95rem; line-height: 1.5; border: 1px solid #dfe5ee; border-radius: 14px; background: #f8fafd; }
+    textarea:focus { outline: none; border-color: #4a90d9; background: #fff; box-shadow: 0 0 0 3px rgba(74,144,217,.15); }
+    .roomhead { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .55rem .8rem; background: #f8fafd; border: 1px solid #eef1f6; border-radius: 14px; }
+    .roomhead .lbl { font-size: .74rem; color: #98a1b0; margin-right: .5rem; }
+    .roomhead .code { font-family: ui-monospace, monospace; font-weight: 700; letter-spacing: .12em; }
+    .row { display: flex; gap: .6rem; align-items: stretch; margin-top: .6rem; }
+    .row .btn { margin-top: 0; }
+    .filebtn { display: flex; align-items: center; justify-content: center; gap: .35rem; flex: 0 0 auto; padding: 0 .9rem; font-size: .88rem; font-weight: 600; border-radius: 12px; border: 1.5px solid #dfe5ee; background: #fff; color: #333; cursor: pointer; }
+    .filebtn:hover { background: #f6f8fc; }
+    .msg { min-height: 1.2em; font-size: .82rem; color: #667085; }
+    .msg.err { color: #b03a2e; }
+    .msg.ok { color: #147a4d; }
+    .listhead { display: flex; align-items: center; justify-content: space-between; margin: 1.3rem 0 .5rem; font-size: .82rem; color: #667085; }
+    .item { border: 1px solid #eef1f6; border-radius: 14px; padding: .7rem .8rem; margin-bottom: .6rem; background: #fff; }
+    .item.new { animation: pop .7s ease; }
+    @keyframes pop { from { background: #eff6ff; border-color: #bfdbfe; } to { background: #fff; border-color: #eef1f6; } }
+    .item .meta { display: flex; justify-content: space-between; gap: .5rem; font-size: .74rem; color: #98a1b0; margin-bottom: .35rem; }
+    .item .body { white-space: pre-wrap; word-break: break-all; font-size: .92rem; line-height: 1.5; max-height: 11rem; overflow: auto; }
+    .item .acts { display: flex; gap: .5rem; align-items: center; margin-top: .55rem; }
+    #qr { width: 190px; height: 190px; margin: .7rem auto 0; display: block; }
+    .qbox { text-align: center; border: 1px solid #eef1f6; border-radius: 14px; padding: .6rem .8rem .9rem; margin-top: .7rem; background: #fbfcfe; }
+    .qbox a { font-size: .78rem; color: #4a90d9; word-break: break-all; }
+    .linkbtn { background: none; border: 0; padding: 0; font: inherit; font-size: .8rem; color: #4a90d9; cursor: pointer; }
+    .linkbtn.warn { color: #b03a2e; }
+    .footrow { display: flex; justify-content: space-between; gap: 1rem; margin-top: 1.1rem; }
+    .note { font-size: .76rem; color: #98a1b0; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="top">
+      <a class="brand" href="/"><img src="/favicon.svg" alt="" />文桥 ClipBridge</a>
+      <a class="home" href="/">← 首页</a>
+    </div>
+
+    <section id="pair" hidden>
+      <h1>剪贴板频道</h1>
+      <p class="sub">两台设备配对一次,之后互传文本/文件都不用再输码。</p>
+      <p><button id="create" class="btn primary" type="button">创建新频道</button></p>
+      <div class="or">或加入已有频道</div>
+      <p><input id="joincode" type="text" inputmode="latin" placeholder="8 位频道码" maxlength="8" autocomplete="off" /></p>
+      <p><button id="join" class="btn quiet" type="button">加入频道</button></p>
+      <p id="pairmsg" class="msg"></p>
+      <p class="note">频道码即凭证,有效期 24 小时,每次发送自动续期;请只分享给信任的设备。</p>
+    </section>
+
+    <section id="room" hidden>
+      <div class="roomhead">
+        <div><span class="lbl">频道码</span><span id="roomcode" class="code"></span></div>
+        <button id="qbtn" class="linkbtn" type="button">二维码配对</button>
+      </div>
+      <div id="qbox" class="qbox" hidden>
+        <img id="qr" alt="频道配对二维码" />
+        <p class="note">另一台设备扫码即可加入,也可以打开这个链接:</p>
+        <p><a id="joinurl" href="#"></a></p>
+      </div>
+
+      <p><textarea id="t" placeholder="粘贴要同步到另一台设备的内容…"></textarea></p>
+      <div class="row">
+        <button id="send" class="btn primary" type="button">发送到频道</button>
+        <label class="filebtn" for="f">📎 文件</label>
+        <input id="f" type="file" hidden />
+      </div>
+      <p id="smsg" class="msg"></p>
+
+      <div class="listhead">
+        <span>频道内容(最近 20 条)</span>
+        <button id="copynew" class="btn mini" type="button" hidden>📋 复制最新一条</button>
+      </div>
+      <div id="list"></div>
+      <p id="empty" class="note">还没有内容。在任意一台已配对的设备上发送,这里会自动出现。</p>
+
+      <div class="footrow">
+        <button id="leave" class="linkbtn" type="button">退出本机频道</button>
+        <button id="destroy" class="linkbtn warn" type="button">销毁频道</button>
+      </div>
+      <p class="note">内容在服务端保留 24 小时(每次发送续期),销毁后立即删除。</p>
+    </section>
+
+    <p id="err" class="msg err"></p>
+  </main>
+  <script>
+    (function () {
+      var LS_KEY = 'cb.channel';
+      var POLL_MS = 4000;
+      var injected = __CHANNEL__;
+      var code = '';
+      var seq = 0;
+      var known = {};      // id -> element,增量渲染,轮询不会打断按钮反馈
+      var payloads = {};   // id -> 正文文本(复制必须同步拿到,故先预取)
+      var fetching = {};
+      var textCount = 0;
+      var timer = null;
+      var from = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? '手机' : '电脑';
+
+      var pair = document.getElementById('pair');
+      var room = document.getElementById('room');
+      var pairmsg = document.getElementById('pairmsg');
+      var errEl = document.getElementById('err');
+      var create = document.getElementById('create');
+      var joincode = document.getElementById('joincode');
+      var join = document.getElementById('join');
+      var roomcode = document.getElementById('roomcode');
+      var qbtn = document.getElementById('qbtn');
+      var qbox = document.getElementById('qbox');
+      var qrimg = document.getElementById('qr');
+      var joinurl = document.getElementById('joinurl');
+      var t = document.getElementById('t');
+      var send = document.getElementById('send');
+      var fileInput = document.getElementById('f');
+      var smsg = document.getElementById('smsg');
+      var list = document.getElementById('list');
+      var empty = document.getElementById('empty');
+      var copynew = document.getElementById('copynew');
+
+      function save(c) { try { localStorage.setItem(LS_KEY, c); } catch (e) {} }
+      function load() { try { return localStorage.getItem(LS_KEY) || ''; } catch (e) { return ''; } }
+      function forget() { try { localStorage.removeItem(LS_KEY); } catch (e) {} }
+      function setMsg(el, text, cls) { el.textContent = text; el.className = 'msg' + (cls ? ' ' + cls : ''); }
+      function b64ok(c) { return /^[A-HJKMNP-Z2-9]{8}$/.test(c); }
+
+      function fmtSize(n) {
+        if (n >= 1000 * 1000) return (n / 1000 / 1000).toFixed(1) + ' MB';
+        if (n >= 1000) return (n / 1000).toFixed(1) + ' KB';
+        return n + ' B';
+      }
+      function fmtTime(ms) {
+        var d = new Date(ms);
+        var p = function (n) { return (n < 10 ? '0' : '') + n; };
+        return p(d.getHours()) + ':' + p(d.getMinutes());
+      }
+
+      // 非安全上下文没有 Clipboard API 时退回 execCommand;必须在手势内同步调用
+      function fallbackCopy(v) {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = v;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.top = '-1000px';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          ta.setSelectionRange(0, v.length);
+          var ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          return ok;
+        } catch (e) { return false; }
+      }
+
+      function copyText(btn, value) {
+        var label = btn.getAttribute('data-label') || btn.textContent;
+        function finish(ok) {
+          btn.textContent = ok ? '已复制 ✓' : (btn.getAttribute('data-fail') || '复制失败,请长按选择');
+          btn.classList.toggle('copied', !!ok);
+          clearTimeout(btn._copyTimer);
+          btn._copyTimer = setTimeout(function () {
+            btn.textContent = label;
+            btn.classList.remove('copied');
+          }, 1600);
+        }
+        var write = navigator.clipboard && navigator.clipboard.writeText
+          ? navigator.clipboard.writeText(value)
+          : Promise.reject();
+        Promise.resolve(write).then(function () { finish(true); }, function () {
+          finish(fallbackCopy(value));
+        });
+      }
+
+      // 预取正文:让点击「复制」时的 writeText 处在手势内同步执行(iOS 必需)
+      function fetchPayload(it, onReady) {
+        if (payloads[it.id] !== undefined || fetching[it.id]) return;
+        fetching[it.id] = true;
+        fetch('/c/' + code + '/e/' + encodeURIComponent(it.id), { cache: 'no-store' })
+          .then(function (r) { if (!r.ok) throw new Error('gone'); return r.text(); })
+          .then(function (text) {
+            payloads[it.id] = text;
+            delete fetching[it.id];
+            if (onReady) onReady(text);
+          }, function () { delete fetching[it.id]; });
+      }
+
+      function renderItem(it, isNew) {
+        var el = document.createElement('div');
+        el.className = 'item' + (isNew ? ' new' : '');
+        var meta = document.createElement('div');
+        meta.className = 'meta';
+        var left = document.createElement('span');
+        left.textContent = (it.from ? it.from + ' · ' : '') + fmtTime(it.at) + (it.kind === 'file' ? ' · 文件' : ' · 文本');
+        var right = document.createElement('span');
+        right.textContent = '# ' + it.seq;
+        meta.appendChild(left);
+        meta.appendChild(right);
+        el.appendChild(meta);
+
+        var body = document.createElement('div');
+        body.className = 'body';
+        el.appendChild(body);
+
+        var acts = document.createElement('div');
+        acts.className = 'acts';
+        el.appendChild(acts);
+
+        if (it.kind === 'file') {
+          body.textContent = (it.name || 'file') + ' · ' + fmtSize(it.size || 0);
+          var dl = document.createElement('a');
+          dl.className = 'btn mini';
+          dl.href = '/c/' + code + '/e/' + encodeURIComponent(it.id);
+          dl.textContent = '⬇ 下载';
+          acts.appendChild(dl);
+        } else {
+          textCount++;
+          var copy = document.createElement('button');
+          copy.className = 'btn mini';
+          copy.type = 'button';
+          copy.setAttribute('data-label', '📋 复制');
+          copy.setAttribute('data-fail', '复制失败,请长按选择');
+          copy.textContent = '载入中…';
+          copy.disabled = true;
+          copy.addEventListener('click', function () {
+            var v = payloads[it.id];
+            if (v === undefined) { fetchPayload(it); return; }
+            copyText(copy, v); // 同步写入,保住用户激活
+          });
+          acts.appendChild(copy);
+          body.textContent = it.preview || '';
+          fetchPayload(it, function (text) {
+            body.textContent = text;
+            copy.disabled = false;
+            copy.textContent = '📋 复制';
+          });
+        }
+        known[it.id] = el;
+        return el;
+      }
+
+      function updateEmpty() {
+        empty.hidden = list.childElementCount > 0;
+        copynew.hidden = textCount === 0;
+      }
+
+      function gone() {
+        if (timer) { clearInterval(timer); timer = null; }
+        forget();
+        room.hidden = true;
+        pair.hidden = false;
+        setMsg(errEl, '频道不存在、链接无效或已过期,请重新创建或输入频道码。', 'err');
+      }
+
+      function applyItems(items) {
+        var fresh = items.slice().sort(function (a, b) { return a.seq - b.seq; }); // 旧的先插,最新的落在最上面
+        var any = false;
+        for (var i = 0; i < fresh.length; i++) {
+          var it = fresh[i];
+          if (known[it.id]) continue;
+          list.insertBefore(renderItem(it, true), list.firstChild);
+          any = true;
+        }
+        updateEmpty();
+        return any;
+      }
+
+      function tick() {
+        if (!code || document.visibilityState === 'hidden') return;
+        fetch('/api/channel/' + code + '?since=' + seq, { cache: 'no-store' })
+          .then(function (r) {
+            if (r.status === 404) { gone(); return null; }
+            return r.json();
+          })
+          .then(function (j) {
+            if (!j) return;
+            setMsg(errEl, '');
+            if (typeof j.seq === 'number') seq = j.seq;
+            if (j.items && j.items.length) applyItems(j.items);
+          }, function () { setMsg(errEl, '网络异常,正在自动重试…', 'err'); });
+      }
+
+      function start() {
+        if (!timer) timer = setInterval(tick, POLL_MS);
+      }
+
+      function enter(c) {
+        code = c;
+        save(c);
+        pair.hidden = true;
+        room.hidden = false;
+        setMsg(errEl, '');
+        roomcode.textContent = c;
+        var url = location.origin + '/c/' + c;
+        qrimg.src = '/?text=' + encodeURIComponent(url) + '&mode=text';
+        joinurl.textContent = url;
+        joinurl.href = url;
+        tick();
+        start();
+      }
+
+      create.addEventListener('click', function () {
+        create.disabled = true;
+        setMsg(pairmsg, '创建中…');
+        fetch('/api/channel', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'create' }),
+        }).then(function (r) { return r.json(); }).then(function (j) {
+          create.disabled = false;
+          setMsg(pairmsg, '');
+          if (j && j.code) enter(j.code);
+          else setMsg(pairmsg, (j && j.error) || '创建失败,请重试', 'err');
+        }, function () {
+          create.disabled = false;
+          setMsg(pairmsg, '网络错误,请重试', 'err');
+        });
+      });
+
+      joincode.addEventListener('input', function () {
+        joincode.value = joincode.value.toUpperCase().replace(/[^A-HJKMNP-Z2-9]/g, '');
+      });
+      function doJoin() {
+        var c = joincode.value.trim().toUpperCase();
+        if (!b64ok(c)) { setMsg(pairmsg, '频道码为 8 位,且不含 I/L/O/0/1', 'err'); return; }
+        enter(c);
+      }
+      join.addEventListener('click', doJoin);
+      joincode.addEventListener('keydown', function (e) { if (e.key === 'Enter') doJoin(); });
+
+      function sendJson(json, okText) {
+        send.disabled = true;
+        setMsg(smsg, '发送中…');
+        fetch('/api/channel', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(json),
+        }).then(function (r) {
+          return r.json().then(function (j) { return { status: r.status, body: j }; });
+        }).then(function (res) {
+          send.disabled = false;
+          if (res.status !== 200) {
+            setMsg(smsg, (res.body && res.body.error) || '发送失败,请重试', 'err');
+            if (res.status === 404) gone();
+            return;
+          }
+          setMsg(smsg, okText, 'ok');
+          t.value = '';
+          tick();
+          setTimeout(function () {
+            if (smsg.textContent === okText) setMsg(smsg, '');
+          }, 1800);
+        }, function () {
+          send.disabled = false;
+          setMsg(smsg, '网络错误,请重试', 'err');
+        });
+      }
+
+      send.addEventListener('click', function () {
+        var v = t.value.trim();
+        if (!v) { setMsg(smsg, '请先粘贴或输入内容', 'err'); return; }
+        if (new TextEncoder().encode(v).length > 32768) { setMsg(smsg, '内容超过 32KB 上限', 'err'); return; }
+        sendJson({ action: 'send', code: code, text: v, from: from }, '已发送 ✓');
+      });
+
+      t.addEventListener('keydown', function (e) {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') send.click();
+      });
+
+      // 文件:走与取件码一致的单次 POST(x-channel-code 指明频道)
+      fileInput.addEventListener('change', function () {
+        var f = fileInput.files && fileInput.files[0];
+        if (!f) return;
+        if (f.size > 25 * 1000 * 1000) { setMsg(smsg, '文件超过 25MB 上限', 'err'); fileInput.value = ''; return; }
+        send.disabled = true;
+        setMsg(smsg, '上传中 0%');
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/channel');
+        xhr.setRequestHeader('content-type', f.type || 'application/octet-stream');
+        xhr.setRequestHeader('x-channel-code', code);
+        xhr.setRequestHeader('x-from', encodeURIComponent(from));
+        try { xhr.setRequestHeader('x-file-name', encodeURIComponent(f.name)); } catch (e) {}
+        xhr.upload.onprogress = function (e) {
+          if (e.lengthComputable) setMsg(smsg, '上传中 ' + Math.round((e.loaded / e.total) * 100) + '%');
+        };
+        xhr.onload = function () {
+          send.disabled = false;
+          fileInput.value = '';
+          var j = {};
+          try { j = JSON.parse(xhr.responseText); } catch (e) {}
+          if (xhr.status === 200) { setMsg(smsg, '已发送 ✓', 'ok'); tick(); }
+          else {
+            setMsg(smsg, j.error || '上传失败,请重试', 'err');
+            if (xhr.status === 404) gone();
+          }
+        };
+        xhr.onerror = function () {
+          send.disabled = false;
+          fileInput.value = '';
+          setMsg(smsg, '网络错误,请重试', 'err');
+        };
+        xhr.send(f);
+      });
+
+      copynew.addEventListener('click', function () {
+        var items = list.children;
+        for (var i = 0; i < items.length; i++) {
+          var btn = items[i].querySelector('button');
+          if (btn && !btn.disabled) { btn.click(); return; }
+        }
+        setMsg(smsg, '正文还在载入,请稍后再试', 'err');
+      });
+
+      qbtn.addEventListener('click', function () { qbox.hidden = !qbox.hidden; });
+
+      document.getElementById('leave').addEventListener('click', function () {
+        forget();
+        location.href = '/c';
+      });
+
+      document.getElementById('destroy').addEventListener('click', function () {
+        if (!confirm('销毁频道?两端已同步的内容都会被删除,且无法恢复。')) return;
+        fetch('/api/channel/' + code, { method: 'DELETE' }).then(function (r) { return r.json(); }).then(function () {
+          gone();
+          setMsg(errEl, '频道已销毁。', 'ok');
+        }, function () { setMsg(errEl, '销毁失败,请重试', 'err'); });
+      });
+
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') tick();
+      });
+
+      if (injected && b64ok(injected)) enter(injected);
+      else {
+        var saved = load();
+        if (b64ok(saved)) enter(saved);
+        else {
+          pair.hidden = false;
+          if (location.pathname !== '/c' && location.pathname !== '/c/') {
+            setMsg(pairmsg, '频道链接无效,请重新配对。', 'err');
+          }
+        }
+      }
+    })();
+  </script>
+</body>
+</html>`;
+
+// 频道页:code 为 null 时渲染配对界面,否则直接进入该频道(扫码/链接配对)
+function channelHtml(code: string | null): string {
+  return CHANNEL_HTML_TEMPLATE.replace('__CHANNEL__', () => JSON.stringify(code));
+}
+
 function clampInt(v: string | null, min: number, max: number, fallback: number): number {
   if (v === null) return fallback;
   const n = Number.parseInt(v, 10);
@@ -1226,6 +1720,170 @@ function randomCode(): string {
   return code;
 }
 
+// ---- 剪贴板频道:索引 + 独立正文键 ----
+// 索引 c:CODE 只放元数据(小、轮询便宜),正文/文件放 c:CODE:e:ID(按需取)。
+interface ChannelItem {
+  id: string;
+  seq: number;
+  at: number;
+  kind: 'text' | 'file';
+  from?: string;
+  name?: string;
+  type?: string;
+  size?: number;
+  preview?: string;
+}
+
+interface ChannelDoc {
+  v: 1;
+  seq: number;
+  updatedAt: number;
+  items: ChannelItem[];
+}
+
+function randomChannelCode(): string {
+  let code = '';
+  for (let i = 0; i < CHANNEL_CODE_LENGTH; i++) {
+    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+function channelKey(code: string): string {
+  return CHANNEL_PREFIX + code;
+}
+
+function channelPayloadKey(code: string, id: string): string {
+  return CHANNEL_PREFIX + code + CHANNEL_PAYLOAD_SEP + id;
+}
+
+function jsonNoStore(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+  });
+}
+
+function channelNotFound(): Response {
+  return errorJson('频道不存在或已过期', 404);
+}
+
+// 设备名只用于时间线标注,做白名单式清洗(去控制字符、截 12 字符)
+function safeFrom(v: string | null | undefined): string | undefined {
+  const s = (v ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 12);
+  return s || undefined;
+}
+
+function decodeHeader(v: string | null): string | null {
+  if (!v) return null;
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    return v;
+  }
+}
+
+async function readChannel(env: Env, code: string): Promise<ChannelDoc | null> {
+  const doc = (await env.TRANSFERS.get(channelKey(code), 'json')) as unknown as ChannelDoc | null;
+  if (!doc || typeof doc.seq !== 'number' || !Array.isArray(doc.items)) return null;
+  return doc;
+}
+
+// id = 序号 + 4 位随机后缀:保序、频道内唯一,且不能靠猜拿到正文
+function makeItemId(seq: number): string {
+  let suffix = '';
+  for (let i = 0; i < 4; i++) suffix += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  return `${seq}-${suffix}`;
+}
+
+// 追加一条:写正文键(带 TTL)→ 更新索引(带 TTL,每次发送续期)
+async function appendChannelItem(
+  env: Env,
+  code: string,
+  payload: { kind: 'text' | 'file'; text?: string; bytes?: ArrayBuffer; name?: string; type?: string; from?: string },
+): Promise<Response> {
+  const doc = await readChannel(env, code);
+  if (!doc) return channelNotFound();
+  const seq = doc.seq + 1;
+  const id = makeItemId(seq);
+  const at = Date.now();
+  const item: ChannelItem = { id, seq, at, kind: payload.kind, ...(payload.from ? { from: payload.from } : {}) };
+
+  let value: string | ArrayBuffer;
+  if (payload.kind === 'file') {
+    const bytes = payload.bytes ?? new ArrayBuffer(0);
+    item.name = payload.name ?? 'file';
+    item.type = payload.type ?? 'application/octet-stream';
+    item.size = bytes.byteLength;
+    value = bytes;
+  } else {
+    const text = payload.text ?? '';
+    item.preview = text.length > CHANNEL_PREVIEW_CHARS ? text.slice(0, CHANNEL_PREVIEW_CHARS) + '…' : text;
+    value = text;
+  }
+
+  await env.TRANSFERS.put(channelPayloadKey(code, id), value, {
+    expirationTtl: CHANNEL_TTL_SECONDS,
+    metadata: { kind: item.kind, name: item.name, type: item.type },
+  });
+
+  const next: ChannelDoc = {
+    v: 1,
+    seq,
+    updatedAt: at,
+    items: [item, ...doc.items].slice(0, CHANNEL_MAX_ITEMS),
+  };
+  await env.TRANSFERS.put(channelKey(code), JSON.stringify(next), { expirationTtl: CHANNEL_TTL_SECONDS });
+  return jsonNoStore({ ok: true, item, ttl: CHANNEL_TTL_SECONDS });
+}
+
+async function createChannel(env: Env, origin: string): Promise<Response> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const code = randomChannelCode();
+    if ((await env.TRANSFERS.get(channelKey(code))) === null) {
+      const doc: ChannelDoc = { v: 1, seq: 0, updatedAt: Date.now(), items: [] };
+      await env.TRANSFERS.put(channelKey(code), JSON.stringify(doc), { expirationTtl: CHANNEL_TTL_SECONDS });
+      return jsonNoStore({
+        code,
+        url: `${origin}/c/${code}`,
+        ttl: CHANNEL_TTL_SECONDS,
+        expiresAt: Date.now() + CHANNEL_TTL_SECONDS * 1000,
+      });
+    }
+  }
+  return errorJson('频道码生成失败,请重试', 500);
+}
+
+// 销毁:索引里存着正文 id,逐个删掉,不留孤儿(t: 的键完全不受影响)
+async function destroyChannel(env: Env, code: string): Promise<Response> {
+  const doc = await readChannel(env, code);
+  if (!doc) return channelNotFound();
+  await Promise.all(doc.items.map((it) => env.TRANSFERS.delete(channelPayloadKey(code, it.id))));
+  await env.TRANSFERS.delete(channelKey(code));
+  return jsonNoStore({ ok: true, deleted: doc.items.length });
+}
+
+async function channelPayloadResponse(env: Env, code: string, id: string): Promise<Response> {
+  const entry = await env.TRANSFERS.getWithMetadata(channelPayloadKey(code, id), { type: 'arrayBuffer' });
+  if (entry.value === null) return errorJson('内容不存在或已过期', 404);
+  const meta = (entry.metadata ?? {}) as { kind?: string; name?: string; type?: string };
+  if (meta.kind === 'file') {
+    const name = meta.name ?? 'file';
+    const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') || 'file';
+    return new Response(entry.value, {
+      headers: {
+        'content-type': meta.type ?? 'application/octet-stream',
+        'content-disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+        'content-length': String(entry.value.byteLength),
+        'cache-control': 'no-store',
+      },
+    });
+  }
+  return new Response(new TextDecoder().decode(entry.value), {
+    headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+  });
+}
+
 function invalidClaim(): Response {
   return new Response(INVALID_HTML, {
     status: 404,
@@ -1263,6 +1921,30 @@ export default {
     // 取件码发送页:任意设备生成取件码,另一台设备凭码取件
     if (url.pathname === '/send') {
       return new Response(SEND_HTML, {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      });
+    }
+
+    // 剪贴板频道页:配对一次后两端免输码(/c 配对,/c/CODE 扫码或链接配对)
+    if (url.pathname === '/c' || url.pathname === '/c/') {
+      return new Response(channelHtml(null), {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+      });
+    }
+    if (url.pathname.startsWith('/c/')) {
+      const rest = url.pathname.slice('/c/'.length);
+      // 频道内正文/文件:/c/CODE/e/ID
+      const payloadMatch = rest.match(/^([A-HJKMNP-Z2-9]{8})\/e\/([A-Za-z0-9-]{1,40})$/);
+      if (payloadMatch) return channelPayloadResponse(env, payloadMatch[1], payloadMatch[2]);
+      const channelCode = rest.trim().toUpperCase();
+      if (CHANNEL_CODE_RE.test(channelCode)) {
+        return new Response(channelHtml(channelCode), {
+          headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+        });
+      }
+      // 格式不对的频道链接:回配对界面并提示(404 便于排查)
+      return new Response(channelHtml(null), {
+        status: 404,
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     }
@@ -1358,6 +2040,72 @@ export default {
         d = toBase64Url(raw);
       }
       return bridgeResponse(bridgeHtml({ d, z }));
+    }
+
+    // 频道 API:JSON 走 create/send,裸二进制 + x-channel-code 走文件发送
+    if (url.pathname === '/api/channel' && request.method === 'POST') {
+      const contentType = request.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        const fileCode = (request.headers.get('x-channel-code') ?? '').trim().toUpperCase();
+        if (!CHANNEL_CODE_RE.test(fileCode)) return errorJson('频道码无效', 400);
+        const declared = Number(request.headers.get('content-length') ?? '0');
+        if (declared > MAX_FILE_BYTES) return errorJson('文件超过 25MB 上限', 400);
+        const buf = await request.arrayBuffer();
+        if (buf.byteLength === 0) return errorJson('文件内容为空', 400);
+        if (buf.byteLength > MAX_FILE_BYTES) return errorJson('文件超过 25MB 上限', 400);
+        let name = 'file';
+        try {
+          name = decodeURIComponent(request.headers.get('x-file-name') ?? '') || 'file';
+        } catch {
+          name = 'file';
+        }
+        name = name.replace(/[\u0000-\u001f\u007f]/g, '').slice(-120) || 'file';
+        const type = /^[\w.+-]+\/[\w.+-]+$/.test(contentType) ? contentType : 'application/octet-stream';
+        return appendChannelItem(env, fileCode, {
+          kind: 'file',
+          bytes: buf,
+          name,
+          type,
+          from: safeFrom(decodeHeader(request.headers.get('x-from'))),
+        });
+      }
+
+      let body: { action?: string; code?: string; text?: string; from?: string };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return errorJson('请求体须为 JSON', 400);
+      }
+      if (body.action === 'create') return createChannel(env, url.origin);
+      if (body.action === 'send') {
+        const sendCode = (body.code ?? '').trim().toUpperCase();
+        if (!CHANNEL_CODE_RE.test(sendCode)) return errorJson('频道码无效', 400);
+        const text = (body.text ?? '').trim();
+        if (!text) return errorJson('内容不能为空', 400);
+        if (new TextEncoder().encode(text).length > TRANSFER_MAX_BYTES) return errorJson('内容超过 32KB 上限', 400);
+        return appendChannelItem(env, sendCode, { kind: 'text', text, from: safeFrom(body.from) });
+      }
+      return errorJson('未知操作', 400);
+    }
+
+    if (url.pathname.startsWith('/api/channel/')) {
+      const apiCode = url.pathname.slice('/api/channel/'.length).trim().toUpperCase();
+      if (!CHANNEL_CODE_RE.test(apiCode)) return errorJson('频道码无效', 400);
+      if (request.method === 'GET') {
+        const doc = await readChannel(env, apiCode);
+        if (!doc) return channelNotFound();
+        const sinceNum = Number(params.get('since') ?? '0');
+        const since = Number.isFinite(sinceNum) ? sinceNum : 0;
+        return jsonNoStore({
+          code: apiCode,
+          seq: doc.seq,
+          updatedAt: doc.updatedAt,
+          ttl: CHANNEL_TTL_SECONDS,
+          items: doc.items.filter((it) => it.seq > since),
+        });
+      }
+      if (request.method === 'DELETE') return destroyChannel(env, apiCode);
+      return errorJson('不支持的请求方法', 405);
     }
 
     // 生成取件码:application/json → 文本;其余 content-type → 二进制文件
