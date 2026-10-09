@@ -68,13 +68,20 @@ check('无效取件码 404', bogus.status === 404);
 const send = await fetch(BASE + '/send');
 const sendHtml = await send.text();
 check(
-  '/send 页 200 + 含生成按钮',
-  send.status === 200 && sendHtml.includes('生成取件码')
+  '/send 页 200 + 含生成按钮与复制链接按钮',
+  send.status === 200 && sendHtml.includes('生成取件码') && sendHtml.includes('id="copy-url-btn"')
 );
 const landing = await fetch(BASE + '/').then((r) => r.text());
 check('使用页含 /send 入口', landing.includes('href="/send"'));
 check('首页含生成取件码功能', landing.includes('生成取件码'));
 check('首页含底部取件码输入框', landing.includes('id="claimcode"'));
+check(
+  '首页含「复制取件链接」按钮 + 复制逻辑',
+  landing.includes('id="copy-url-btn"') &&
+    landing.includes('复制取件链接') &&
+    landing.includes("copyText(copyUrlBtn, currentClaimUrl)"),
+  '缺少按钮或事件绑定'
+);
 
 const qrRes = await fetch(BASE + '/qr');
 const qrHtml = await qrRes.text();

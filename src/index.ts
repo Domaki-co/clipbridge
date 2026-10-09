@@ -321,6 +321,24 @@ const LANDING_HTML = `<!doctype html>
       opacity: 0.55;
       cursor: not-allowed;
     }
+    .btn.secondary {
+      margin-top: 0.6rem;
+      background: #ffffff;
+      color: #1d4ed8;
+      border: 1.5px solid #bfdbfe;
+      box-shadow: 0 2px 10px rgba(37, 99, 235, 0.08);
+    }
+    .btn.secondary:hover {
+      background: #eff6ff;
+      filter: none;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.16);
+    }
+    .copy-pill.copied,
+    .btn.secondary.copied {
+      color: #047857;
+      background: #ecfdf5;
+      border-color: #a7f3d0;
+    }
     #msg {
       min-height: 1.3em;
       margin: 0.5rem 0 0;
@@ -529,10 +547,11 @@ const LANDING_HTML = `<!doctype html>
         <p class="result-step">在另一台设备打开取件链接、扫码或输入码:</p>
         <div class="code-box">
           <span id="code"></span>
-          <button id="copy-code-btn" class="copy-pill" type="button">复制</button>
+          <button id="copy-code-btn" class="copy-pill" type="button" data-label="复制" data-fail="请长按">复制</button>
         </div>
         <p><img id="qr" alt="取件二维码" /></p>
         <p><a id="claimurl" class="claim" target="_blank" rel="noopener"></a></p>
+        <p><button id="copy-url-btn" class="btn secondary" type="button" data-label="🔗 复制取件链接" data-fail="复制失败,请长按链接手动复制">🔗 复制取件链接</button></p>
         <p class="note">取件码 10 分钟内有效;文本取件即焚,文件到期自动销毁。</p>
       </div>
     </div>
@@ -573,6 +592,7 @@ const LANDING_HTML = `<!doctype html>
     var claimurl = document.getElementById('claimurl');
     var code = document.getElementById('code');
     var copyCodeBtn = document.getElementById('copy-code-btn');
+    var copyUrlBtn = document.getElementById('copy-url-btn');
     var qr = document.getElementById('qr');
     var fileInput = document.getElementById('file');
     var pick = document.getElementById('pick');
@@ -645,10 +665,12 @@ const LANDING_HTML = `<!doctype html>
     });
 
     var currentRawCode = '';
+    var currentClaimUrl = '';
     function showResult(j) {
       msg.textContent = '';
       progress.textContent = '';
       currentRawCode = j.code;
+      currentClaimUrl = j.url;
       code.textContent = j.code.split('').join(' ');
       claimurl.textContent = j.url;
       claimurl.href = j.url;
@@ -656,12 +678,53 @@ const LANDING_HTML = `<!doctype html>
       result.hidden = false;
     }
 
-    copyCodeBtn.addEventListener('click', function () {
-      if (!currentRawCode || !navigator.clipboard || !navigator.clipboard.writeText) return;
-      navigator.clipboard.writeText(currentRawCode).then(function () {
-        copyCodeBtn.textContent = '已复制 ✓';
-        setTimeout(function () { copyCodeBtn.textContent = '复制'; }, 1500);
+    // 非安全上下文(如用 IP 访问)没有 Clipboard API,退回 execCommand 兜底
+    function fallbackCopy(t) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = t;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-1000px';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, t.length);
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    // 复制并给出按钮级反馈:成功显示「已复制 ✓」,1.6 秒后复原;失败提示手动长按复制
+    function copyText(btn, value) {
+      var label = btn.getAttribute('data-label') || btn.textContent;
+      function finish(ok) {
+        btn.textContent = ok ? '已复制 ✓' : (btn.getAttribute('data-fail') || '复制失败,请长按选择');
+        btn.classList.toggle('copied', !!ok);
+        clearTimeout(btn._copyTimer);
+        btn._copyTimer = setTimeout(function () {
+          btn.textContent = label;
+          btn.classList.remove('copied');
+        }, 1600);
+      }
+      var write = navigator.clipboard && navigator.clipboard.writeText
+        ? navigator.clipboard.writeText(value)
+        : Promise.reject();
+      Promise.resolve(write).then(function () { finish(true); }, function () {
+        finish(fallbackCopy(value));
       });
+    }
+
+    copyCodeBtn.addEventListener('click', function () {
+      if (currentRawCode) copyText(copyCodeBtn, currentRawCode);
+    });
+
+    // 取件链接一键复制:发给别人时不必先打开(打开即取件,文本会被烧掉)
+    copyUrlBtn.addEventListener('click', function () {
+      if (currentClaimUrl) copyText(copyUrlBtn, currentClaimUrl);
     });
 
     function uploadFile() {
