@@ -72,7 +72,16 @@ check(
   send.status === 200 && sendHtml.includes('生成取件码') && sendHtml.includes('id="copy-url-btn"')
 );
 const landing = await fetch(BASE + '/').then((r) => r.text());
-check('使用页含 /send 入口', landing.includes('href="/send"'));
+// 首页自身已同时覆盖发送与取件两个面板,故不再重复挂 /send、/r 入口(路由仍保留)
+check(
+  '首页导航不再重复指向 /send 与 /r',
+  !landing.includes('href="/send"') && !landing.includes('href="/r"'),
+  '首页仍有重复的发送页/取件页入口'
+);
+check(
+  '首页导航保留二维码生成与剪贴板频道入口',
+  landing.includes('href="/qr"') && landing.includes('href="/c"')
+);
 check('首页含生成取件码功能', landing.includes('生成取件码'));
 check('首页含底部取件码输入框', landing.includes('id="claimcode"'));
 check(

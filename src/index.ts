@@ -586,7 +586,7 @@ const LANDING_HTML = `<!doctype html>
     </div>
   </main>
 
-  <p class="nav"><a href="/qr">普通二维码生成</a> · <a href="/r">独立取件页</a> · <a href="/send">发送页</a> · <a href="/c">剪贴板频道</a></p>
+  <p class="nav"><a href="/qr">普通二维码生成</a> · <a href="/c">剪贴板频道</a></p>
 
   <script>
     if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {

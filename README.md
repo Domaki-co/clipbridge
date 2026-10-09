@@ -43,7 +43,7 @@ Roll back a bad deploy with `npx wrangler rollback` (deployment history is kept 
 | `/` | GET | Home transfer and claim page; with `?text=` returns the SVG QR |
 | `/qr` | GET | Standalone QR generator page |
 | `/t?d=…` | GET | Bridge page where a scanned copy-code lands |
-| `/send` | GET | Claim-code sender page (matches home page) |
+| `/send` | GET | Claim-code sender page (byte-identical to `/`; kept for old links, not linked from the home footer) |
 | `/r` | GET | Claim-code input page (auto-claims at 4 characters) |
 | `/r/:code` | GET | Claim a transfer — text burns on read; files stay claimable until TTL |
 | `/r/:code/download` | GET | Download a claimed file |
@@ -204,6 +204,8 @@ BASE=https://your-deployment.example.com npm test   # or point them at any live 
 ```
 
 ## Version
+
+**v1.3.1** (2026-10-09) — tidier home page: the landing page already has both panels (paste text / pick a file to get a claim code, plus a claim-code box below), so its footer no longer repeats **发送页** and **独立取件页**. The `/send` and `/r` routes are untouched — old bookmarks, printed QR codes and the `README` instructions all still work.
 
 **v1.3.0** (2026-10-09) — realtime channel: each room now has a Durable Object (`ChannelRoom`) and a WebSocket (`/api/channel/:code/ws`) that pushes every new item to the other device instantly (measured 0–3 ms locally for text, 26–28 ms for a file item, 53–55 ms for a destroy notice), with the text body inlined in the push so the copy button is live immediately. Adds a **● 实时 / ○ 轮询中** status tag, a 30 s safety poll while connected, exponential-backoff reconnect, and an automatic fall back to the 2 s polling path when the socket is unavailable — the REST endpoints and the claim-code flows are unchanged. Deploying this version creates the Durable Object class (see `migrations` in `wrangler.jsonc`).
 
