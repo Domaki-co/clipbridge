@@ -6,6 +6,9 @@ import { renderSVG } from 'uqr';
 
 interface Env {
   TRANSFERS: KVNamespace;
+  // 剪贴板频道的实时通道:一个频道一个 Durable Object,负责串行化写入并广播给所有连接。
+  // 可缺失(未配置 DO 绑定时功能退化为纯 KV + 轮询,一切照旧)。
+  CHANNELS?: DurableObjectNamespace;
 }
 
 const ECC_LEVELS = ['L', 'M', 'Q', 'H'] as const;
@@ -1207,6 +1210,9 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
     .roomhead { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .55rem .8rem; background: #f8fafd; border: 1px solid #eef1f6; border-radius: 14px; }
     .roomhead .lbl { font-size: .74rem; color: #98a1b0; margin-right: .5rem; }
     .roomhead .code { font-family: ui-monospace, monospace; font-weight: 700; letter-spacing: .12em; }
+    .tag { display: inline-block; margin-left: .5rem; padding: .1rem .42rem; border-radius: 999px; font-size: .68rem; background: #f1f4f9; color: #667085; vertical-align: 1px; }
+    .tag.on { background: #ecfdf5; color: #047857; }
+    .tag.off { background: #fef3f2; color: #b03a2e; }
     .row { display: flex; gap: .6rem; align-items: stretch; margin-top: .6rem; }
     .row .btn { margin-top: 0; }
     .filebtn { display: flex; align-items: center; justify-content: center; gap: .35rem; flex: 0 0 auto; padding: 0 .9rem; font-size: .88rem; font-weight: 600; border-radius: 12px; border: 1.5px solid #dfe5ee; background: #fff; color: #333; cursor: pointer; }
@@ -1250,7 +1256,7 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
 
     <section id="room" hidden>
       <div class="roomhead">
-        <div><span class="lbl">频道码</span><span id="roomcode" class="code"></span></div>
+        <div><span class="lbl">频道码</span><span id="roomcode" class="code"></span><span id="link" class="tag">连接中…</span></div>
         <button id="qbtn" class="linkbtn" type="button">二维码配对</button>
       </div>
       <div id="qbox" class="qbox" hidden>
@@ -1295,6 +1301,12 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
       var fetching = {};
       var textCount = 0;
       var timer = null;
+      // 实时通道:连上 WebSocket 就是秒级推送;连不上/断了自动退回轮询,并指数退避重连
+      var SAFETY_MS = 30000;   // WS 正常时的兜底轮询(推送万一丢了还能自愈)
+      var WS_RETRY_MIN = 1000;
+      var WS_RETRY_MAX = 20000;
+      var PING_MS = 25000;
+      var ws = null, wsRetry = 0, wsRetryTimer = null, pingTimer = null, pongTimer = null;
       var from = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? '手机' : '电脑';
 
       var pair = document.getElementById('pair');
@@ -1316,7 +1328,9 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
       var list = document.getElementById('list');
       var empty = document.getElementById('empty');
       var copynew = document.getElementById('copynew');
+      var linkEl = document.getElementById('link');
       var newestText = null; // 最新一条文本的复制按钮:它才是「复制最新一条」该复制的东西
+      var readies = {};      // id -> 该条正文就绪回调:推送把正文补上时直接用它启用复制按钮
 
       function save(c) { try { localStorage.setItem(LS_KEY, c); } catch (e) {} }
       function load() { try { return localStorage.getItem(LS_KEY) || ''; } catch (e) { return ''; } }
@@ -1374,7 +1388,8 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
 
       // 预取正文:让点击「复制」时的 writeText 处在手势内同步执行(iOS 必需)
       function fetchPayload(it, onReady) {
-        if (payloads[it.id] !== undefined || fetching[it.id]) return;
+        if (payloads[it.id] !== undefined) { if (onReady) onReady(payloads[it.id]); return; }
+        if (fetching[it.id]) return;
         fetching[it.id] = true;
         fetch('/c/' + code + '/e/' + encodeURIComponent(it.id), { cache: 'no-store' })
           .then(function (r) { if (!r.ok) throw new Error('gone'); return r.text(); })
@@ -1434,6 +1449,7 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
             copyText(copy, v); // 同步写入,保住用户激活
           });
           acts.appendChild(copy);
+          readies[it.id] = ready;
           newestText = copy;
           body.textContent = it.preview || '';
           fetchPayload(it, ready);
@@ -1449,6 +1465,8 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
 
       function gone() {
         if (timer) { clearInterval(timer); timer = null; }
+        stopSocket();
+        setLink('');
         forget();
         resetRoom();
         room.hidden = true;
@@ -1462,6 +1480,7 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
         known = {};
         payloads = {};
         fetching = {};
+        readies = {};
         textCount = 0;
         seq = 0;
         newestText = null;
@@ -1497,8 +1516,92 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
           }, function () { setMsg(errEl, '网络异常,正在自动重试…', 'err'); });
       }
 
+      // 连接状态:● 实时(WS 已连)/ ○ 轮询中(WS 断了,退回轮询)/ 连接中…
+      function setLink(text, cls) {
+        linkEl.textContent = text;
+        linkEl.className = 'tag' + (cls ? ' ' + cls : '');
+      }
+
+      // WS 连上时不再高频轮询,只保留 30 秒兜底;断开就回到 2 秒轮询
+      function schedule() {
+        if (timer) { clearInterval(timer); timer = null; }
+        timer = setInterval(tick, ws && ws.readyState === 1 ? SAFETY_MS : POLL_MS);
+      }
+
+      function stopSocket() {
+        clearTimeout(wsRetryTimer); wsRetryTimer = null;
+        clearInterval(pingTimer); pingTimer = null;
+        clearTimeout(pongTimer); pongTimer = null;
+        wsRetry = 0;
+        var s = ws;
+        ws = null;
+        if (s) { try { s.onclose = null; s.close(); } catch (e) {} }
+      }
+
+      function cleanupSocket(sock) {
+        if (sock !== ws) return;
+        ws = null;
+        clearInterval(pingTimer); pingTimer = null;
+        clearTimeout(pongTimer); pongTimer = null;
+        if (!code || room.hidden) return;   // 已经不在房间里了,不必重连
+        setLink('○ 轮询中');
+        schedule();
+        tick();
+        wsRetry = Math.min(wsRetry ? wsRetry * 2 : WS_RETRY_MIN, WS_RETRY_MAX);
+        clearTimeout(wsRetryTimer);
+        wsRetryTimer = setTimeout(connect, wsRetry);
+      }
+
+      function connect() {
+        if (!code || room.hidden) return;
+        if (typeof WebSocket === 'undefined') { setLink('○ 轮询中'); return; }
+        stopSocket();
+        var sock;
+        try {
+          sock = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/channel/' + code + '/ws');
+        } catch (e) { setLink('○ 轮询中'); return; }
+        ws = sock;
+        setLink('连接中…');
+        sock.onopen = function () {
+          wsRetry = 0;
+          setLink('● 实时', 'on');
+          schedule();
+          tick();  // 连上先对齐一次,补上断开期间可能漏掉的条目
+          clearInterval(pingTimer);
+          pingTimer = setInterval(function () {
+            if (sock.readyState !== 1) return;
+            try { sock.send('{"type":"ping"}'); } catch (e) {}
+            clearTimeout(pongTimer);
+            pongTimer = setTimeout(function () {
+              // 10 秒没回 pong:不等关闭握手(浏览器可能拖到 30 秒才给 onclose),立刻退回轮询并重连
+              try { sock.close(); } catch (e) {}
+              cleanupSocket(sock);
+            }, 10000);
+          }, PING_MS);
+        };
+        sock.onmessage = function (ev) {
+          clearTimeout(pongTimer);
+          var m;
+          try { m = JSON.parse(ev.data); } catch (e) { return; }
+          if (!m || m.type === 'ready' || m.type === 'pong') return;
+          if (m.type === 'item' && m.item) {
+            if (typeof m.text === 'string') {
+              payloads[m.item.id] = m.text;                      // 正文随推送到达,复制按钮立刻可用
+              if (readies[m.item.id]) readies[m.item.id](m.text); // 该条已渲染过:补上正文并启用复制
+            }
+            if (typeof m.item.seq === 'number' && m.item.seq > seq) seq = m.item.seq;
+            applyItems([m.item]);
+            return;
+          }
+          if (m.type === 'destroyed') { gone(); setMsg(errEl, '频道已被销毁。', 'err'); }
+        };
+        sock.onclose = function () { cleanupSocket(sock); };
+        sock.onerror = function () { try { sock.close(); } catch (e) {} };
+      }
+
       function start() {
-        if (!timer) timer = setInterval(tick, POLL_MS);
+        schedule();
+        connect();
       }
 
       function enter(c) {
@@ -1644,7 +1747,9 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
       });
 
       document.addEventListener('visibilitychange', function () {
-        if (document.visibilityState === 'visible') tick();
+        if (document.visibilityState !== 'visible') return;
+        tick();
+        if (!ws) connect();  // 手机休眠后连接常常已经悄悄断了,回到前台主动重连
       });
 
       if (injected && b64ok(injected)) enter(injected);
@@ -1814,14 +1919,16 @@ function makeItemId(seq: number): string {
   return `${seq}-${suffix}`;
 }
 
-// 追加一条:写正文键(带 TTL)→ 更新索引(带 TTL,每次发送续期)
+// 追加一条:写正文键(带 TTL)→ 更新索引(带 TTL,每次发送续期)。
+// 返回 null 表示频道不存在;文本条目把正文一并返回,便于实时通道随推送内联下发。
+// 注意这是「读-改-写」且 KV 没有事务,同一频道并发写入要靠 Durable Object 串行化(见 ChannelRoom)。
 async function appendChannelItem(
   env: Env,
   code: string,
   payload: { kind: 'text' | 'file'; text?: string; bytes?: ArrayBuffer; name?: string; type?: string; from?: string },
-): Promise<Response> {
+): Promise<{ item: ChannelItem; text?: string } | null> {
   const doc = await readChannel(env, code);
-  if (!doc) return channelNotFound();
+  if (!doc) return null;
   const seq = doc.seq + 1;
   const id = makeItemId(seq);
   const at = Date.now();
@@ -1852,7 +1959,11 @@ async function appendChannelItem(
     items: [item, ...doc.items].slice(0, CHANNEL_MAX_ITEMS),
   };
   await env.TRANSFERS.put(channelKey(code), JSON.stringify(next), { expirationTtl: CHANNEL_TTL_SECONDS });
-  return jsonNoStore({ ok: true, item, ttl: CHANNEL_TTL_SECONDS });
+  return payload.kind === 'text' ? { item, text: payload.text ?? '' } : { item };
+}
+
+function appendResponse(res: { item: ChannelItem }): Response {
+  return jsonNoStore({ ok: true, item: res.item, ttl: CHANNEL_TTL_SECONDS });
 }
 
 async function createChannel(env: Env, origin: string): Promise<Response> {
@@ -1900,6 +2011,152 @@ async function channelPayloadResponse(env: Env, code: string, id: string): Promi
   return new Response(new TextDecoder().decode(entry.value), {
     headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
   });
+}
+
+// ── 实时通道(Durable Objects)────────────────────────────────────────────────
+// 一个频道 = 一个 DO 实例(实例名就是频道码),它做三件事:
+//   ① 串行化写入:KV 的「读索引 → 追加 → 写索引」没有事务,同秒并发会丢条目;
+//      同一个 DO 内请求天然排队,写入不再互相覆盖。
+//   ② 广播中心:持有该频道的所有 WebSocket 连接,新条目一落地就推给所有设备,
+//      接收端不再等下一次轮询(KV 跨 colo 最长约 60s 见不到,这条路完全绕开)。
+//   ③ 销毁通知:频道被销毁时立刻通知所有连接回到配对界面。
+// 连接用 Hibernation API 持有:没有消息时 DO 会被换出内存,不产生常驻费用;
+// 心跳 ping/pong 交给 setWebSocketAutoResponse 由运行时直接应答,连唤醒都省掉。
+export class ChannelRoom {
+  private state: DurableObjectState;
+  private env: Env;
+
+  constructor(state: DurableObjectState, env: Env) {
+    this.state = state;
+    this.env = env;
+    this.state.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    if (pathname.endsWith('/ws')) return this.upgrade(request);
+    if (pathname.endsWith('/append')) return this.append(request);
+    if (pathname.endsWith('/broadcast')) return this.broadcastItem(request);
+    if (pathname.endsWith('/destroy')) return this.destroy(request);
+    return errorJson('not found', 404);
+  }
+
+  // 升级:客户端一连上就先收到 ready,便于它立刻对齐一次索引
+  private upgrade(request: Request): Response {
+    if ((request.headers.get('upgrade') ?? '').toLowerCase() !== 'websocket') {
+      return errorJson('需要 WebSocket 升级', 426);
+    }
+    const pair = new WebSocketPair();
+    this.state.acceptWebSocket(pair[1]);
+    pair[1].send(JSON.stringify({ type: 'ready' }));
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+
+  // 心跳正常情况下由 setWebSocketAutoResponse 应答,这里只是兜底
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    if (typeof message === 'string' && message.indexOf('ping') >= 0) {
+      try {
+        ws.send('{"type":"pong"}');
+      } catch {
+        /* 连接刚好断了,忽略 */
+      }
+    }
+  }
+
+  async webSocketClose(): Promise<void> {
+    /* 无需处理:getWebSockets() 只返回还活着的连接 */
+  }
+
+  async webSocketError(): Promise<void> {}
+
+  private fanout(payload: unknown): void {
+    const data = JSON.stringify(payload);
+    for (const ws of this.state.getWebSockets()) {
+      try {
+        ws.send(data);
+      } catch {
+        /* 单个连接坏了不影响其他设备 */
+      }
+    }
+  }
+
+  // 文本条目:DO 里串行完成 KV 读改写,正文随推送内联下发(另一端不用再取一次)
+  private async append(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => null)) as { code?: string; text?: string; from?: string } | null;
+    const code = (body?.code ?? '').trim().toUpperCase();
+    if (!body || !CHANNEL_CODE_RE.test(code)) return errorJson('频道码无效', 400);
+    const res = await appendChannelItem(this.env, code, {
+      kind: 'text',
+      text: body.text ?? '',
+      from: safeFrom(body.from),
+    });
+    if (!res) return channelNotFound();
+    this.fanout({ type: 'item', item: res.item, text: res.text });
+    return appendResponse(res);
+  }
+
+  // 文件条目:正文由 Worker 直接写 KV(几十 MB 不必穿过 DO),这里只负责通知
+  private async broadcastItem(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => null)) as { item?: ChannelItem } | null;
+    if (!body?.item?.id) return errorJson('缺少 item', 400);
+    this.fanout({ type: 'item', item: body.item });
+    return jsonNoStore({ ok: true });
+  }
+
+  private async destroy(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => null)) as { code?: string } | null;
+    const code = (body?.code ?? '').trim().toUpperCase();
+    if (!body || !CHANNEL_CODE_RE.test(code)) return errorJson('频道码无效', 400);
+    const res = await destroyChannel(this.env, code);
+    if (res.ok) this.fanout({ type: 'destroyed' });
+    return res;
+  }
+}
+
+// 取频道对应的 DO;未配置 CHANNELS 绑定时返回 null,调用方退化为纯 KV 路径
+function channelRoom(env: Env, code: string): DurableObjectStub | null {
+  if (!env.CHANNELS) return null;
+  return env.CHANNELS.get(env.CHANNELS.idFromName(code));
+}
+
+// 文本写入交给 DO(串行 + 广播);没有绑定时退回本地 KV 写入
+async function appendViaRoom(
+  env: Env,
+  code: string,
+  text: string,
+  from: string | undefined,
+): Promise<Response> {
+  const room = channelRoom(env, code);
+  if (!room) {
+    const res = await appendChannelItem(env, code, { kind: 'text', text, from });
+    return res ? appendResponse(res) : channelNotFound();
+  }
+  try {
+    return await room.fetch('https://channel-room/append', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code, text, from }),
+    });
+  } catch {
+    // DO 不可用不该让发送失败:退回直接写 KV,接收端靠兜底轮询也能看到
+    const res = await appendChannelItem(env, code, { kind: 'text', text, from });
+    return res ? appendResponse(res) : channelNotFound();
+  }
+}
+
+// 文件写完后通知房间里的其他设备;失败不影响发送结果
+async function notifyRoom(env: Env, code: string, item: ChannelItem): Promise<void> {
+  const room = channelRoom(env, code);
+  if (!room) return;
+  try {
+    await room.fetch('https://channel-room/broadcast', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ item }),
+    });
+  } catch {
+    /* 推送失败:接收端会靠兜底轮询补上 */
+  }
 }
 
 function invalidClaim(): Response {
@@ -2079,13 +2336,17 @@ export default {
         }
         name = name.replace(/[\u0000-\u001f\u007f]/g, '').slice(-120) || 'file';
         const type = /^[\w.+-]+\/[\w.+-]+$/.test(contentType) ? contentType : 'application/octet-stream';
-        return appendChannelItem(env, fileCode, {
+        // 文件正文由 Worker 直接写 KV(不穿过 DO),写完后通知房间里的其他设备
+        const appended = await appendChannelItem(env, fileCode, {
           kind: 'file',
           bytes: buf,
           name,
           type,
           from: safeFrom(decodeHeader(request.headers.get('x-from'))),
         });
+        if (!appended) return channelNotFound();
+        await notifyRoom(env, fileCode, appended.item);
+        return appendResponse(appended);
       }
 
       let body: { action?: string; code?: string; text?: string; from?: string };
@@ -2101,13 +2362,28 @@ export default {
         const text = (body.text ?? '').trim();
         if (!text) return errorJson('内容不能为空', 400);
         if (new TextEncoder().encode(text).length > TRANSFER_MAX_BYTES) return errorJson('内容超过 32KB 上限', 400);
-        return appendChannelItem(env, sendCode, { kind: 'text', text, from: safeFrom(body.from) });
+        // 文本走 Durable Object:同一个频道串行写入,并立刻广播给所有连接
+        return appendViaRoom(env, sendCode, text, safeFrom(body.from));
       }
       return errorJson('未知操作', 400);
     }
 
     if (url.pathname.startsWith('/api/channel/')) {
-      const apiCode = url.pathname.slice('/api/channel/'.length).trim().toUpperCase();
+      let rest = url.pathname.slice('/api/channel/'.length);
+      // 实时通道:/api/channel/:code/ws(WS 升级请求原样转发给 DO,保留 Upgrade 头)
+      if (rest.endsWith('/ws')) {
+        rest = rest.slice(0, -3);
+        const wsCode = rest.trim().toUpperCase();
+        if (!CHANNEL_CODE_RE.test(wsCode)) return errorJson('频道码无效', 400);
+        const wsRoom = channelRoom(env, wsCode);
+        if (!wsRoom) return errorJson('实时通道未启用', 503);
+        if (request.method !== 'GET') return errorJson('不支持的请求方法', 405);
+        if ((request.headers.get('upgrade') ?? '').toLowerCase() !== 'websocket') {
+          return errorJson('需要 WebSocket 升级', 426);
+        }
+        return wsRoom.fetch(request);
+      }
+      const apiCode = rest.trim().toUpperCase();
       if (!CHANNEL_CODE_RE.test(apiCode)) return errorJson('频道码无效', 400);
       if (request.method === 'GET') {
         const doc = await readChannel(env, apiCode);
@@ -2122,7 +2398,22 @@ export default {
           items: doc.items.filter((it) => it.seq > since),
         });
       }
-      if (request.method === 'DELETE') return destroyChannel(env, apiCode);
+      if (request.method === 'DELETE') {
+        // 交给 DO:串行删除并立刻通知所有连接「频道没了」
+        const room = channelRoom(env, apiCode);
+        if (room) {
+          try {
+            return await room.fetch('https://channel-room/destroy', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ code: apiCode }),
+            });
+          } catch {
+            /* DO 不可用时退回直接删除 */
+          }
+        }
+        return destroyChannel(env, apiCode);
+      }
       return errorJson('不支持的请求方法', 405);
     }
 

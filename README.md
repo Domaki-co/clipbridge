@@ -15,9 +15,10 @@
 - **Small-file transfer** — the same claim codes carry files up to 25 MB (drag & drop on `/send`); the receiver gets a download page, fully compatible with multi-threaded mobile download managers
 - **One-tap copy-link button** — the sender's result card copies the claim URL to the clipboard with **🔗 复制取件链接**, ready to paste into a chat; you never have to open the link yourself (opening it consumes the text claim). Falls back to `document.execCommand` without the Clipboard API, and always gives visible feedback
 - **Fault-tolerant** — out-of-range numbers are clamped, invalid colors fall back to defaults; bad input never causes a 500
-- **Clipboard channel** — `/c` pairs two devices once (scan the QR), then they share a persistent clipboard: whatever either side sends appears on the other within ~2 seconds, text or files, no claim code to retype. Keeps the 20 most recent items for 24 hours
+- **Clipboard channel** — `/c` pairs two devices once (scan the QR), then they share a persistent clipboard: whatever either side sends appears on the other **instantly over a WebSocket** (measured 0–3 ms locally, 26–55 ms for files and room-destroy notices), text or files, no claim code to retype. Keeps the 20 most recent items for 24 hours
 - **CORS-ready** — `Access-Control-Allow-Origin: *`, so the API can be embedded from any origin
-- **No moving parts** — the only state is Workers KV (claim codes and channel items): no database, no R2, no Durable Objects. Runs comfortably inside the Workers free tier
+- **Degrades instead of breaking** — if the realtime socket cannot connect (or the Durable Object binding is missing), the room falls back to 2 s polling on its own, shows **○ 轮询中** instead of **● 实时**, and reconnects with exponential backoff
+- **No moving parts** — the only state is Workers KV (claim codes and channel items), plus one Durable Object per live room that does nothing but fan out WebSocket pushes: no database, no R2, no cron. Runs comfortably inside the Workers free tier
 
 ## Quick Start
 
@@ -51,7 +52,8 @@ Roll back a bad deploy with `npx wrangler rollback` (deployment history is kept 
 | `/c/:code/e/:id` | GET | Raw text or file download for one channel item |
 | `/api/transfer` | POST | Create a transfer — JSON body for text, raw bytes + `x-file-name` header for files |
 | `/api/channel` | POST | Create a channel (`{"action":"create"}`) or send to it (JSON `{"action":"send",…}` / raw bytes + `x-channel-code`) |
-| `/api/channel/:code` | GET | Poll a channel — `?since=<seq>` returns only newer items |
+| `/api/channel/:code` | GET | Read a channel — `?since=<seq>` returns only newer items (also the polling fallback) |
+| `/api/channel/:code/ws` | GET | WebSocket upgrade for a room — the server pushes `{type:"item"…}`, `{type:"destroyed"}` and answers `{"type":"ping"}` with `{"type":"pong"}` |
 | `/api/channel/:code` | DELETE | Destroy a channel and every payload it still indexes |
 | `/favicon.svg` | GET | Site icon |
 
@@ -125,16 +127,17 @@ Claim codes are perfect for one-off transfers, but sending five things in a row 
 
 1. Open `/c` on the device you have in hand, tap **创建新频道** (create channel). You get an 8-character code and a QR.
 2. Scan that QR with the other device (or paste the code / the `/c/<code>` link into its browser once). Both ends now remember the channel in `localStorage`.
-3. From then on: paste text and tap **发送**, or pick a file — it shows up on the other device within about 2 seconds, with a **📋 复制** button that puts the text on that device's system clipboard. Send in either direction; both ends poll the same room.
+3. From then on: paste text and tap **发送**, or pick a file — it shows up on the other device right away, with a **📋 复制** button that puts the text on that device's system clipboard. Send in either direction; both ends share the same room.
 
 Notes:
 
-- The room keeps the **20 most recent items for 24 hours** (each new item refreshes the clock) and the server holds a short preview (≤120 characters) plus a pointer per item — the full text or file is fetched per item when you open or copy it, which keeps polling cheap. Text sent to a channel does **not** burn on read, unlike a claim code.
+- The room keeps the **20 most recent items for 24 hours** (each new item refreshes the clock) and the server holds a short preview (≤120 characters) plus a pointer per item. Text sent to a channel does **not** burn on read, unlike a claim code.
+- Realtime by default: the room page opens a WebSocket to one Durable Object per room (`/api/channel/<code>/ws`), and the server pushes each new item — including the full text body, so a copy button is usable the moment it appears. Local two-device measurement: **0–3 ms** for pushed text, 26–28 ms for a file item and 53–55 ms for a destroy notice, versus ~2 s for polling. If the socket drops (or never connects), the page shows **○ 轮询中** and falls back to 2 s polling, then reconnects with exponential backoff (1 s → 20 s) and switches back to **● 实时**; a 30 s safety poll keeps running while the socket is up, so a lost broadcast heals by itself. Heartbeats are answered by the runtime (`setWebSocketAutoResponse`), so idle rooms do not bill.
 - Nothing is ever copied to your clipboard silently. Browsers (iOS Safari especially) only allow clipboard writes inside a real tap, so the copy button prefetches its payload and copies synchronously when tapped. **复制最新一条** (copy newest) only ever copies the newest text item — while its body is still loading it says so instead of quietly copying an older item, and a failed prefetch turns the button into **📋 重试载入** (retry).
-- Two devices sending in the same second can very occasionally lose one item (KV reads and writes are eventually consistent and not transactional) — the room is a convenience channel, not a sync engine. Keep using claim codes for anything you cannot afford to lose.
-- **离开** (leave) only forgets the channel on this device; **销毁频道** (destroy) deletes it for both, including the payloads it still indexes. Items pushed out of the 20-item window stop being reachable from the room but their KV entries can linger until the 24-hour TTL.
+- Text sends are serialized by the room's Durable Object, so two texts sent in the same second can no longer lose one. A file upload still updates the index from the Worker itself (the bytes never travel through the Durable Object), so a file and a text landing in the exact same instant remain theoretically racy — the room is a convenience channel, not a sync engine. Keep using claim codes for anything you cannot afford to lose.
+- **离开** (leave) only forgets the channel on this device; **销毁频道** (destroy) deletes it for both, including the payloads it still indexes, and notifies the other end over the socket. Items pushed out of the 20-item window stop being reachable from the room but their KV entries can linger until the 24-hour TTL.
 - Channel codes are 8 characters from the same unambiguous alphabet as claim codes (`A–Z` minus `I`, `L`, `O` and digits `0`, `1`), so they are readable aloud and never collide with the 4-character claim space (separate KV key prefix `c:` vs `t:` — the existing flows are untouched).
-- Polling costs roughly 1 read per device per interval (`~1 800/hour` at 2 s, about 43 k reads/day per device), so two paired devices stay inside the 100 k reads/day KV free tier; a busy room is still one key, so it never touches the 1 000 list/day budget. (Measured locally: an item sent through the API shows up on the other page in 1.4–1.9 s.)
+- Cost: while the socket is up, reads are just the 30 s safety poll (~120/hour per device) plus one read per item you open or copy, so two paired devices use a small fraction of the 100 k reads/day KV free tier. Only when the socket cannot connect does the page go back to 2 s polling (`~1 800/hour`, about 43 k reads/day per device); a busy room is still one key, so it never touches the 1 000 list/day budget. (Before the socket was added, every received item cost a 2 s polling delay — measured 1.4–1.9 s locally.)
 
 ### Handy payload formats
 
@@ -165,6 +168,7 @@ BEGIN:VCARD%0AVERSION:3.0%0AFN:Jane%0ATEL:+8613800000000%0AEND:VCARD
   "routes": [{ "pattern": "qr.example.com", "custom_domain": true }]
   ```
 - **Free tier** — about 100 000 requests/day and 10 ms CPU per invocation (as of 2026-09, check Cloudflare's pricing page). This toy uses a tiny fraction of either.
+- **Durable Objects (v1.3.0+)** — `wrangler.jsonc` declares one `ChannelRoom` class and a `v1` migration using `new_sqlite_classes` (the free plan only offers SQLite-backed Durable Objects). `npm run deploy` creates it on first deploy; nothing else needs configuring. If you remove the `CHANNELS` binding the room pages still work — they just stay on 2 s polling (`/api/channel/:code/ws` answers 503).
 - **Reachability** — `workers.dev` subdomains can be unreliable inside mainland China; a custom domain usually helps.
 
 ## Project Structure
@@ -201,6 +205,8 @@ BASE=https://your-deployment.example.com npm test   # or point them at any live 
 
 ## Version
 
+**v1.3.0** (2026-10-09) — realtime channel: each room now has a Durable Object (`ChannelRoom`) and a WebSocket (`/api/channel/:code/ws`) that pushes every new item to the other device instantly (measured 0–3 ms locally for text, 26–28 ms for a file item, 53–55 ms for a destroy notice), with the text body inlined in the push so the copy button is live immediately. Adds a **● 实时 / ○ 轮询中** status tag, a 30 s safety poll while connected, exponential-backoff reconnect, and an automatic fall back to the 2 s polling path when the socket is unavailable — the REST endpoints and the claim-code flows are unchanged. Deploying this version creates the Durable Object class (see `migrations` in `wrangler.jsonc`).
+
 **v1.2.1** (2026-10-09) — channel latency & copy-correctness: polling interval 4 s → 2 s (measured receive delay 1.4–1.9 s locally, ~half of before), **复制最新一条** never falls back to an older item while the newest body is still loading (and offers **📋 重试载入** if its prefetch fails), and entering another channel now resets `since`/the rendered list so a re-paired room shows its existing items.
 
 **v1.2.0** (2026-10-09) — clipboard channel: `/c` pairs two devices once and then syncs text and files between them without any claim code (8-character channel code, QR pairing, 20-item / 24-hour room in Workers KV, ~4 s polling, per-item copy button; the existing claim-code and file flows are unchanged).
@@ -224,7 +230,7 @@ BASE=https://your-deployment.example.com npm test   # or point them at any live 
 | Send the claim link to someone | Generate on homepage, tap **🔗 复制取件链接** on the result card, paste it into any chat |
 | Send text from phone to PC | Open homepage on phone to send, enter the 4-digit claim code on PC below homepage |
 | Send a file either way | Drop it on homepage / send page, open claim link on the other device and tap **Download** |
-| Move things back and forth all day (same two devices) | Open `/c` once on both and scan the QR — afterwards paste and tap **发送**, the other device picks it up in ~2 s |
+| Move things back and forth all day (same two devices) | Open `/c` once on both and scan the QR — afterwards paste and tap **发送**, the other device gets it instantly over the socket (2 s polling only if the socket is blocked) |
 | Reuse a clipboard channel in a group | Create the channel, share the `/c/<code>` link or QR — everyone who opens it joins the same room |
 | Generate a plain QR code | Enter text on `/qr` for instant SVG rendering and preview |
 | Share a Wi-Fi password / contact card | Paste the payload (see formats below), scan — phones parse these natively |

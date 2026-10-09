@@ -5,5 +5,11 @@
   "compatibility_date": "2026-09-01",
   "workers_dev": true,
   "routes": [{ "pattern": "qr.sparkfly.top", "custom_domain": true }],
-  "kv_namespaces": [{ "binding": "TRANSFERS", "id": "21138086f41c4634822c4d91d1ddf2c5" }]
+  "kv_namespaces": [{ "binding": "TRANSFERS", "id": "21138086f41c4634822c4d91d1ddf2c5" }],
+  // 剪贴板频道的实时通道:一个频道一个 Durable Object,串行化写入并广播给所有连接。
+  // 免费计划只支持 SQLite 后端的 DO,所以用 new_sqlite_classes。
+  "durable_objects": {
+    "bindings": [{ "name": "CHANNELS", "class_name": "ChannelRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ChannelRoom"] }]
 }

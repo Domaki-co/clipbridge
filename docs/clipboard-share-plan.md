@@ -3,7 +3,7 @@
 > 目标(用户原话):「新加一个粘贴板共享的功能是否可行,给出方案。不想每次手机 PC 输入码获取文件,原有功能保持不变。」
 > 本文是可行性判断与方案设计的原始记录(写于实现之前)。
 >
-> **实现状态(2026-10-09)**:方案 A 已按本文落地并发布为 **v1.2.0** —— `/c` 配对页、`/c/:code` 房间、`/api/channel`(创建/发送)、`/api/channel/:code`(轮询/销毁)、`/c/:code/e/:id`(正文与文件);KV 键前缀 `c:`,原有 `t:` 取件码链路一行未改。测试见 `tests/channel.mjs`(25 项)与 README 的测试章节;方案 B/C/D 仍是可选的后续阶段。
+> **实现状态(2026-10-09)**:方案 A 已按本文落地并发布为 **v1.2.0** —— `/c` 配对页、`/c/:code` 房间、`/api/channel`(创建/发送)、`/api/channel/:code`(轮询/销毁)、`/c/:code/e/:id`(正文与文件);KV 键前缀 `c:`,原有 `t:` 取件码链路一行未改。**v1.2.1** 把轮询 4 s → 2 s 并修掉两个客户端 bug;**v1.3.0** 落地了下面的方案 B(Durable Object + WebSocket 推送,保留轮询回退)。测试见 `tests/channel.mjs`(35 项,含 6 项 WebSocket)与 README 的测试章节;方案 C/D 仍是可选的后续阶段。
 
 ## 实现后实测:延迟到底出在哪(2026-10-09,决定做方案 B 的依据)
 
@@ -16,6 +16,17 @@
 - **免费额度也拦着**:2 s ≈ 1800 读/小时/设备(两台约 8.6 万读/天,仍在 10 万读/天之内);1.5 s ≈ 2400 读/小时/设备 → 两台 11.5 万读/天,**超出免费额度**。所以 2 s 是纯 KV 轮询下不掏钱的现实下限。
 - 已落地的小改(**v1.2.1**):`POLL_MS` 4 s → 2 s(本地接收延迟实测 1.4–1.9 s);顺带修掉两个真 bug ——「复制最新一条」在最新正文尚未预取完时会静默复制更旧的条目(现在只认最新那条并明确提示,预取失败给「📋 重试载入」),以及换入另一个频道时 `since`/列表/`payloads` 未重置(新频道 seq 从 1 开始会被旧的 `since` 全部过滤掉,且可能复制到上一个频道的内容)。
 - **下一步:方案 B**。要真正到秒级/亚秒级只有推送一条路(Durable Objects + WebSocket):消息到达即下发,顺带用单线程 actor 消掉「同秒并发丢一条」。设计要点:频道页优先升级 WebSocket(`/api/channel/:code/ws`),连不上或断开就自动回退到现有 2 s 轮询(现有 REST 接口全部保留,便于灰度与排障);DO 只做「连接 + 广播」,条目仍按现有格式存 KV/DO storage。
+
+## 方案 B 已落地(2026-10-09,发布为 v1.3.0)
+
+- **架构**:每个频道一个 Durable Object(`export class ChannelRoom`,`wrangler.jsonc` 里 `durable_objects.bindings` + `migrations: [{tag:"v1", new_sqlite_classes:["ChannelRoom"]}]`,免费计划只支持 SQLite 后端);房间页连 `/api/channel/:code/ws`,服务端 `this.state.acceptWebSocket(pair[1])` 后用 `getWebSockets()` 逐连接广播。心跳用 `setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}','{"type":"pong"}'))`,由运行时直接应答,空闲房间不被唤醒计费。
+- **文本写入走 DO**(`POST /api/channel` 文本分支 → `appendViaRoom()` → DO `/append`),单线程 actor 把 KV 读改写串起来 → 顺带修掉「同秒并发丢一条」。**文件字节不穿过 DO**(25 MB 上限,且 DO storage 单值上限未获证实):仍由 Worker 自己写 KV,写完再调 DO `/broadcast` 只推元数据;广播失败不影响发送成功(照样 200)。
+- **正文内联在推送里**:广播 `{type:'item', item, text}`(≤32 KB),客户端先写 `payloads[item.id]` 再 `applyItems([item])`,复制按钮条目一出现就能用——省掉「先拿索引再取正文」的第二次请求,也绕开 KV 跨 colo 最长 ~60 s 的读延迟。
+- **销毁也走推送**:`DELETE /api/channel/:code` → DO `/destroy` → `destroyChannel()` 成功后 `fanout({type:'destroyed'})`,另一端立刻回配对界面。
+- **必须有回退**:WS 连不上或断开时 `cleanupSocket()` 把状态降到「○ 轮询中」、`schedule()` 切回 2 s 轮询、`tick()` 立即对齐,并以指数退避重连(1 s → 20 s);WS 正常时只保留 **30 秒兜底轮询**(丢一次广播能自愈)。心跳 25 s 一次、10 s 无 pong 就 `close()` 并**立刻** `cleanupSocket()`,不等 `onclose`——实测关闭一个已 OPEN 的 socket,Chrome 可能要 ~30 秒才回调。
+- **没绑定也能用**:`env.CHANNELS?` 缺失时 `channelRoom()` 返回 null、`/ws` 返回 503,页面纯轮询;`appendViaRoom()`/`notifyRoom()` 都退回直接写 KV。REST 接口与取件码链路一行未改。
+- **实测**(双设备真 Chrome,`/tmp/cdp_channel_ws.mjs`,20 项断言全过):文本推送 **0–3 ms**、文件条目 26–28 ms、销毁通知 53–55 ms;退化路径 2 s 轮询 878–1821 ms;放开后 983 ms 自动重连回「● 实时」。回归:`BASE=http://localhost:8787 npm test` 四套 66 项全绿(channel 套 35 项含 6 项 WS)。
+- **部署**:`npm run deploy` 首次部署会自动创建 `ChannelRoom` 类,无需其他配置。
 
 ## 0. 结论(先说能不能)
 

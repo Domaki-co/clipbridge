@@ -65,6 +65,16 @@ check(
     pairHtml.includes('function resetRoom()') &&
     pairHtml.includes('resetRoom();')
 );
+check(
+  '频道页含实时通道客户端(WS 优先 + 断线退轮询 + 兜底轮询)',
+  pairHtml.includes("'/api/channel/' + code + '/ws'") &&
+    pairHtml.includes("'wss://'") &&
+    pairHtml.includes('SAFETY_MS = 30000') &&
+    pairHtml.includes('var PING_MS = 25000') &&
+    pairHtml.includes('● 实时') &&
+    pairHtml.includes('○ 轮询中') &&
+    pairHtml.includes('m.type === ' + "'destroyed'")
+);
 
 // 3. 空频道
 const list0 = await api('/api/channel/' + code);
@@ -174,15 +184,72 @@ check(
   `len=${capped.body.items.length} first=${seqs[0]} last=${seqs[19]}`
 );
 
-// 10. 销毁:索引与正文一并删除
+// 10. 实时通道:WS 连上后新条目即时推送(不再等下一次轮询),心跳有应答
+const sock = new WebSocket(BASE.replace(/^http/, 'ws') + '/api/channel/' + code + '/ws');
+const inbox = [];
+sock.addEventListener('message', (ev) => {
+  try {
+    inbox.push(JSON.parse(ev.data));
+  } catch {}
+});
+async function waitForMsg(pred, ms = 5000) {
+  const t0 = Date.now();
+  for (;;) {
+    const hit = inbox.find(pred);
+    if (hit) return hit;
+    if (Date.now() - t0 > ms) return null;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+const opened = await new Promise((resolve) => {
+  sock.addEventListener('open', () => resolve(true));
+  sock.addEventListener('error', () => resolve(false));
+  setTimeout(() => resolve(false), 5000);
+});
+check('实时通道 WS 升级成功', opened === true);
+check('连上先收到 ready', !!(await waitForMsg((m) => m.type === 'ready')));
+
+sock.send('{"type":"ping"}');
+check('心跳 ping → pong', !!(await waitForMsg((m) => m.type === 'pong')));
+
+const pushedText = '推送:不该等下一次轮询 ' + Date.now();
+const pushed = await sendJson({ action: 'send', code, text: pushedText, from: '手机' });
+const pushedMsg = await waitForMsg((m) => m.type === 'item' && m.text === pushedText, 3000);
+check(
+  '新文本即时推送 + 正文随推送内联',
+  pushedMsg?.item?.id === pushed.body?.item?.id && pushedMsg?.item?.seq === pushed.body?.item?.seq,
+  JSON.stringify(pushedMsg || null).slice(0, 140)
+);
+
+const fileRes = await fetch(BASE + '/api/channel', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/octet-stream',
+    'x-channel-code': code,
+    'x-file-name': encodeURIComponent('推送文件.bin'),
+    'x-from': encodeURIComponent('手机'),
+  },
+  body: new Uint8Array([1, 2, 3, 4, 5]),
+});
+const fileBody = await fileRes.json();
+const fileMsg = await waitForMsg((m) => m.type === 'item' && m.item?.id === fileBody.item?.id, 3000);
+check(
+  '文件条目也即时广播(只发元数据、不带正文)',
+  fileRes.status === 200 && fileMsg?.item?.kind === 'file' && fileMsg.text === undefined && fileMsg.item.size === 5,
+  JSON.stringify(fileMsg || null).slice(0, 140)
+);
+
+// 11. 销毁:索引与正文一并删除
 const newestId = capped.body.items[0].id;
 const del = await api('/api/channel/' + code, { method: 'DELETE' });
 check('销毁 200 + 删除计数', del.status === 200 && del.body.deleted === 20, JSON.stringify(del.body));
+check('销毁即时通知所有连接', !!(await waitForMsg((m) => m.type === 'destroyed', 3000)));
+sock.close();
 check('销毁后列表 404', (await api('/api/channel/' + code)).status === 404);
 check('销毁后正文 404', (await fetch(`${BASE}/c/${code}/e/${newestId}`)).status === 404);
 check('销毁不存在的频道 404', (await api('/api/channel/' + code, { method: 'DELETE' })).status === 404);
 
-// 11. 交叉回归:原有一次性取件码链路(取件即焚)不受频道影响
+// 12. 交叉回归:原有一次性取件码链路(取件即焚)不受频道影响
 const legacy = await sendJson({ action: 'send', code: 'ZZZZZZZZ', text: 'x' }); // 只借道校验:频道码合法但不存在
 const legacyCreate = await api('/api/transfer', {
   method: 'POST',
