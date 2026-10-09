@@ -56,6 +56,15 @@ check(
 );
 const badLink = await fetch(BASE + '/c/XXXX');
 check('无效频道链接 404 + 回配对界面', badLink.status === 404 && (await badLink.text()).includes('创建新频道'));
+check(
+  '频道页 2 秒轮询 + 「复制最新一条」只认最新文本',
+  pairHtml.includes('var POLL_MS = 2000') &&
+    pairHtml.includes('newestText = copy') &&
+    pairHtml.includes('newestText.click()') &&
+    pairHtml.includes('最新一条的正文还在载入') &&
+    pairHtml.includes('function resetRoom()') &&
+    pairHtml.includes('resetRoom();')
+);
 
 // 3. 空频道
 const list0 = await api('/api/channel/' + code);

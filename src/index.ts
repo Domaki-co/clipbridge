@@ -1286,7 +1286,7 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
   <script>
     (function () {
       var LS_KEY = 'cb.channel';
-      var POLL_MS = 4000;
+      var POLL_MS = 2000;
       var injected = __CHANNEL__;
       var code = '';
       var seq = 0;
@@ -1316,6 +1316,7 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
       var list = document.getElementById('list');
       var empty = document.getElementById('empty');
       var copynew = document.getElementById('copynew');
+      var newestText = null; // 最新一条文本的复制按钮:它才是「复制最新一条」该复制的东西
 
       function save(c) { try { localStorage.setItem(LS_KEY, c); } catch (e) {} }
       function load() { try { return localStorage.getItem(LS_KEY) || ''; } catch (e) { return ''; } }
@@ -1381,7 +1382,7 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
             payloads[it.id] = text;
             delete fetching[it.id];
             if (onReady) onReady(text);
-          }, function () { delete fetching[it.id]; });
+          }, function () { delete fetching[it.id]; if (onReady) onReady(null); });
       }
 
       function renderItem(it, isNew) {
@@ -1421,18 +1422,21 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
           copy.setAttribute('data-fail', '复制失败,请长按选择');
           copy.textContent = '载入中…';
           copy.disabled = true;
-          copy.addEventListener('click', function () {
-            var v = payloads[it.id];
-            if (v === undefined) { fetchPayload(it); return; }
-            copyText(copy, v); // 同步写入,保住用户激活
-          });
-          acts.appendChild(copy);
-          body.textContent = it.preview || '';
-          fetchPayload(it, function (text) {
+          var ready = function (text) {
+            if (text === undefined || text === null) { copy.disabled = false; copy.textContent = '📋 重试载入'; return; }
             body.textContent = text;
             copy.disabled = false;
             copy.textContent = '📋 复制';
+          };
+          copy.addEventListener('click', function () {
+            var v = payloads[it.id];
+            if (v === undefined) { fetchPayload(it, ready); return; }
+            copyText(copy, v); // 同步写入,保住用户激活
           });
+          acts.appendChild(copy);
+          newestText = copy;
+          body.textContent = it.preview || '';
+          fetchPayload(it, ready);
         }
         known[it.id] = el;
         return el;
@@ -1446,9 +1450,23 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
       function gone() {
         if (timer) { clearInterval(timer); timer = null; }
         forget();
+        resetRoom();
         room.hidden = true;
         pair.hidden = false;
         setMsg(errEl, '频道不存在、链接无效或已过期,请重新创建或输入频道码。', 'err');
+      }
+
+      // 进房间/频道失效时清干净:否则换一个频道后 since 还是旧值(新频道 seq 从 1 开始会被全部过滤掉),
+      // 列表与 payloads 也会残留上一个频道的内容,「复制最新一条」可能复制到旧频道的东西。
+      function resetRoom() {
+        known = {};
+        payloads = {};
+        fetching = {};
+        textCount = 0;
+        seq = 0;
+        newestText = null;
+        list.textContent = '';
+        updateEmpty();
       }
 
       function applyItems(items) {
@@ -1486,6 +1504,7 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
       function enter(c) {
         code = c;
         save(c);
+        resetRoom();
         pair.hidden = true;
         room.hidden = false;
         setMsg(errEl, '');
@@ -1602,12 +1621,11 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
       });
 
       copynew.addEventListener('click', function () {
-        var items = list.children;
-        for (var i = 0; i < items.length; i++) {
-          var btn = items[i].querySelector('button');
-          if (btn && !btn.disabled) { btn.click(); return; }
-        }
-        setMsg(smsg, '正文还在载入,请稍后再试', 'err');
+        // 只认最新那一条文本:它还没载入完就说清楚,绝不退而复制更旧的条目
+        if (!newestText) { setMsg(smsg, '正文还在载入,请稍后再试', 'err'); return; }
+        if (newestText.disabled) { setMsg(smsg, '最新一条的正文还在载入,请稍等一两秒再点', 'err'); return; }
+        setMsg(smsg, '');
+        newestText.click();
       });
 
       qbtn.addEventListener('click', function () { qbox.hidden = !qbox.hidden; });

@@ -15,7 +15,7 @@
 - **Small-file transfer** — the same claim codes carry files up to 25 MB (drag & drop on `/send`); the receiver gets a download page, fully compatible with multi-threaded mobile download managers
 - **One-tap copy-link button** — the sender's result card copies the claim URL to the clipboard with **🔗 复制取件链接**, ready to paste into a chat; you never have to open the link yourself (opening it consumes the text claim). Falls back to `document.execCommand` without the Clipboard API, and always gives visible feedback
 - **Fault-tolerant** — out-of-range numbers are clamped, invalid colors fall back to defaults; bad input never causes a 500
-- **Clipboard channel** — `/c` pairs two devices once (scan the QR), then they share a persistent clipboard: whatever either side sends appears on the other within ~4 seconds, text or files, no claim code to retype. Keeps the 20 most recent items for 24 hours
+- **Clipboard channel** — `/c` pairs two devices once (scan the QR), then they share a persistent clipboard: whatever either side sends appears on the other within ~2 seconds, text or files, no claim code to retype. Keeps the 20 most recent items for 24 hours
 - **CORS-ready** — `Access-Control-Allow-Origin: *`, so the API can be embedded from any origin
 - **No moving parts** — the only state is Workers KV (claim codes and channel items): no database, no R2, no Durable Objects. Runs comfortably inside the Workers free tier
 
@@ -125,16 +125,16 @@ Claim codes are perfect for one-off transfers, but sending five things in a row 
 
 1. Open `/c` on the device you have in hand, tap **创建新频道** (create channel). You get an 8-character code and a QR.
 2. Scan that QR with the other device (or paste the code / the `/c/<code>` link into its browser once). Both ends now remember the channel in `localStorage`.
-3. From then on: paste text and tap **发送**, or pick a file — it shows up on the other device within about 4 seconds, with a **📋 复制** button that puts the text on that device's system clipboard. Send in either direction; both ends poll the same room.
+3. From then on: paste text and tap **发送**, or pick a file — it shows up on the other device within about 2 seconds, with a **📋 复制** button that puts the text on that device's system clipboard. Send in either direction; both ends poll the same room.
 
 Notes:
 
 - The room keeps the **20 most recent items for 24 hours** (each new item refreshes the clock) and the server holds a short preview (≤120 characters) plus a pointer per item — the full text or file is fetched per item when you open or copy it, which keeps polling cheap. Text sent to a channel does **not** burn on read, unlike a claim code.
-- Nothing is ever copied to your clipboard silently. Browsers (iOS Safari especially) only allow clipboard writes inside a real tap, so the copy button prefetches its payload and copies synchronously when tapped.
+- Nothing is ever copied to your clipboard silently. Browsers (iOS Safari especially) only allow clipboard writes inside a real tap, so the copy button prefetches its payload and copies synchronously when tapped. **复制最新一条** (copy newest) only ever copies the newest text item — while its body is still loading it says so instead of quietly copying an older item, and a failed prefetch turns the button into **📋 重试载入** (retry).
 - Two devices sending in the same second can very occasionally lose one item (KV reads and writes are eventually consistent and not transactional) — the room is a convenience channel, not a sync engine. Keep using claim codes for anything you cannot afford to lose.
 - **离开** (leave) only forgets the channel on this device; **销毁频道** (destroy) deletes it for both, including the payloads it still indexes. Items pushed out of the 20-item window stop being reachable from the room but their KV entries can linger until the 24-hour TTL.
 - Channel codes are 8 characters from the same unambiguous alphabet as claim codes (`A–Z` minus `I`, `L`, `O` and digits `0`, `1`), so they are readable aloud and never collide with the 4-character claim space (separate KV key prefix `c:` vs `t:` — the existing flows are untouched).
-- Polling costs roughly 1 read per device per interval (`~900/hour` at 4 s), well under the KV free tier; a busy room is still one key, so it never touches the 1 000 list/day budget.
+- Polling costs roughly 1 read per device per interval (`~1 800/hour` at 2 s, about 43 k reads/day per device), so two paired devices stay inside the 100 k reads/day KV free tier; a busy room is still one key, so it never touches the 1 000 list/day budget. (Measured locally: an item sent through the API shows up on the other page in 1.4–1.9 s.)
 
 ### Handy payload formats
 
@@ -201,6 +201,8 @@ BASE=https://your-deployment.example.com npm test   # or point them at any live 
 
 ## Version
 
+**v1.2.1** (2026-10-09) — channel latency & copy-correctness: polling interval 4 s → 2 s (measured receive delay 1.4–1.9 s locally, ~half of before), **复制最新一条** never falls back to an older item while the newest body is still loading (and offers **📋 重试载入** if its prefetch fails), and entering another channel now resets `since`/the rendered list so a re-paired room shows its existing items.
+
 **v1.2.0** (2026-10-09) — clipboard channel: `/c` pairs two devices once and then syncs text and files between them without any claim code (8-character channel code, QR pairing, 20-item / 24-hour room in Workers KV, ~4 s polling, per-item copy button; the existing claim-code and file flows are unchanged).
 
 **v1.1.1** (2026-10-09) — copy-link button: the sender's result card copies the claim URL in one tap (Clipboard API with an `execCommand` fallback and visible button feedback).
@@ -222,7 +224,7 @@ BASE=https://your-deployment.example.com npm test   # or point them at any live 
 | Send the claim link to someone | Generate on homepage, tap **🔗 复制取件链接** on the result card, paste it into any chat |
 | Send text from phone to PC | Open homepage on phone to send, enter the 4-digit claim code on PC below homepage |
 | Send a file either way | Drop it on homepage / send page, open claim link on the other device and tap **Download** |
-| Move things back and forth all day (same two devices) | Open `/c` once on both and scan the QR — afterwards paste and tap **发送**, the other device picks it up in ~4 s |
+| Move things back and forth all day (same two devices) | Open `/c` once on both and scan the QR — afterwards paste and tap **发送**, the other device picks it up in ~2 s |
 | Reuse a clipboard channel in a group | Create the channel, share the `/c/<code>` link or QR — everyone who opens it joins the same room |
 | Generate a plain QR code | Enter text on `/qr` for instant SVG rendering and preview |
 | Share a Wi-Fi password / contact card | Paste the payload (see formats below), scan — phones parse these natively |
