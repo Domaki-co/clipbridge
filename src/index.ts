@@ -772,8 +772,8 @@ const LANDING_HTML = `<!doctype html>
 
     function doSend() {
       if (currentFile) { uploadFile(); return; }
-      var t = text.value.trim();
-      if (!t) { msg.textContent = '请先输入内容或选择文件'; return; }
+      var t = text.value; // 不裁首尾空白:空格和换行也是用户要传的内容
+      if (!t.trim()) { msg.textContent = '请先输入内容或选择文件'; return; }
       if (new TextEncoder().encode(t).length > 32768) { msg.textContent = '内容超过 32KB 上限'; return; }
       go.disabled = true;
       msg.textContent = '生成中…';
@@ -829,7 +829,7 @@ const LANDING_HTML = `<!doctype html>
 // 中转页模板:__PAYLOAD__ 由 bridgeHtml() 注入——/t 传 null(读 URL 参数),
 // /r/:code 传 {d,z}(服务端内联,避免重定向与 URL 长度限制)。
 // replace 用函数形式,防止载荷内容被当作替换模式解释。
-function bridgeHtml(payload: { d: string; z: number } | null): string {
+function bridgeHtml(payload: BridgePayload | null): string {
   return BRIDGE_HTML_TEMPLATE.replace('__PAYLOAD__', () => JSON.stringify(payload));
 }
 
@@ -896,6 +896,7 @@ const BRIDGE_HTML_TEMPLATE = `<!doctype html>
       var init = __PAYLOAD__;
       var d = init ? init.d : q.get('d');
       var compressed = init ? init.z === 1 : q.get('z') === '1';
+      var sum = init ? init.c : q.get('c'); // 老链接不带校验和,那时跳过校验
       var current = '';
 
       function bytesFromB64Url(s) {
@@ -921,16 +922,39 @@ const BRIDGE_HTML_TEMPLATE = `<!doctype html>
         status.className = 'status' + (cls ? ' ' + cls : '');
       }
 
+      // 非安全上下文(用 IP 打开、旧 WebView)没有 Clipboard API,退回 execCommand
+      function fallbackCopy(value) {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = value;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.top = '-1000px';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          ta.setSelectionRange(0, value.length);
+          var ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          return ok;
+        } catch (e) {
+          return false;
+        }
+      }
+
       function copyThen() {
-        if (!navigator.clipboard || !navigator.clipboard.writeText) {
-          setStatus('此浏览器不支持一键复制,请长按选择文本', 'err');
+        function done(ok) {
+          setStatus(ok ? '已复制 ✓' : '复制失败,请长按选择文本', ok ? 'ok' : 'err');
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(current).then(function () {
+            done(true);
+          }, function () {
+            done(fallbackCopy(current));
+          });
           return;
         }
-        navigator.clipboard.writeText(current).then(function () {
-          setStatus('已复制 ✓', 'ok');
-        }, function () {
-          setStatus('复制失败,请长按选择文本', 'err');
-        });
+        done(fallbackCopy(current));
       }
 
       // 只有点击「复制全文」才写入剪贴板,不做任何隐式复制
@@ -978,14 +1002,39 @@ const BRIDGE_HTML_TEMPLATE = `<!doctype html>
         body.hidden = false;
       }
 
-      function fail() {
-        setStatus('内容无效或已损坏', 'err');
+      function fail(why) {
+        setStatus(why || '内容无效或已损坏', 'err');
+      }
+
+      // 与服务端同款 FNV-1a:链接被截断/改写时立刻报错,不会解出半截文字
+      function fnv1a(bytes) {
+        var h = 0x811c9dc5;
+        for (var i = 0; i < bytes.length; i++) {
+          h ^= bytes[i];
+          h = Math.imul(h, 0x01000193) >>> 0;
+        }
+        return ('0000000' + h.toString(16)).slice(-8);
       }
 
       try {
-        var bytes = bytesFromB64Url(d);
-        var p = compressed ? inflateRaw(bytes) : Promise.resolve(bytes);
-        p.then(function (b) { show(new TextDecoder().decode(b)); }, fail);
+        if (!d) {
+          fail('链接里没有内容参数,多半是复制时被截断了');
+        } else {
+          var bytes = bytesFromB64Url(d);
+          if (sum && fnv1a(bytes) !== sum) {
+            fail('链接不完整(内容被截断或改动),请重新获取');
+          } else if (!compressed) {
+            show(new TextDecoder().decode(bytes));
+          } else if (typeof DecompressionStream === 'undefined') {
+            fail('当前浏览器版本过低,无法解压内容;请用系统浏览器重新打开');
+          } else {
+            inflateRaw(bytes).then(function (b) {
+              show(new TextDecoder().decode(b));
+            }, function () {
+              fail('内容解压失败,链接可能不完整');
+            });
+          }
+        }
       } catch (e) {
         fail();
       }
@@ -1445,7 +1494,14 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
           };
           copy.addEventListener('click', function () {
             var v = payloads[it.id];
-            if (v === undefined) { fetchPayload(it, ready); return; }
+            if (v === undefined) {
+              // 未就绪时点它就是"重试":必须给出可见反馈,否则按钮看起来是坏的
+              copy.disabled = true;
+              copy.textContent = '载入中…';
+              setMsg(smsg, '正在重新载入正文…', '');
+              fetchPayload(it, ready);
+              return;
+            }
             copyText(copy, v); // 同步写入,保住用户激活
           });
           acts.appendChild(copy);
@@ -1678,8 +1734,8 @@ const CHANNEL_HTML_TEMPLATE = `<!doctype html>
       }
 
       send.addEventListener('click', function () {
-        var v = t.value.trim();
-        if (!v) { setMsg(smsg, '请先粘贴或输入内容', 'err'); return; }
+        var v = t.value; // 不裁首尾空白,否则粘进去的报文/代码会走形
+        if (!v.trim()) { setMsg(smsg, '请先粘贴或输入内容', 'err'); return; }
         if (new TextEncoder().encode(v).length > 32768) { setMsg(smsg, '内容超过 32KB 上限', 'err'); return; }
         sendJson({ action: 'send', code: code, text: v, from: from }, '已发送 ✓');
       });
@@ -1804,33 +1860,54 @@ async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-function bridgeUrl(origin: string, text: string, compressed: Uint8Array | null): string {
-  const bytes = compressed ?? new TextEncoder().encode(text);
-  return `${origin}/t?d=${toBase64Url(bytes)}${compressed ? '&z=1' : ''}`;
+// FNV-1a(32 位)校验和:把载荷字节的指纹带进链接。截断或改写的链接
+// 能立刻被识别,而不是悄悄解出少了一截的文字。
+function fnv1a(bytes: Uint8Array): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) {
+    h ^= bytes[i];
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+type BridgePayload = { d: string; z: number; c: string };
+
+// 一份载荷同时给出三种形态:二维码里要放的字符串、/t 链接参数、内联对象
+function bridgePayload(bytes: Uint8Array, compressed: boolean): BridgePayload {
+  return { d: toBase64Url(bytes), z: compressed ? 1 : 0, c: fnv1a(bytes) };
+}
+
+function bridgeUrl(origin: string, p: BridgePayload): string {
+  return `${origin}/t?d=${p.d}${p.z ? '&z=1' : ''}&c=${p.c}`;
 }
 
 // 生成复制码要编码的内容:原文与压缩后的桥接 URL 取更短且在预算内的;
 // 都超预算则返回原文,回退为普通文本码(调用方照常出码或按容量报 400)。
-async function bridgeContent(origin: string, text: string): Promise<string> {
+async function bridgeContent(origin: string, text: string): Promise<{ content: string } & BridgePayload> {
   const encodeLen = (s: string) => new TextEncoder().encode(s).length;
-  const candidates = [bridgeUrl(origin, text, null)];
+  const raw = new TextEncoder().encode(text);
+  const variants = [{ p: bridgePayload(raw, false) }];
   try {
-    candidates.push(bridgeUrl(origin, text, await deflateRaw(new TextEncoder().encode(text))));
+    variants.push({ p: bridgePayload(await deflateRaw(raw), true) });
   } catch {
     // 运行时不支持 CompressionStream 时只用原文变体
   }
-  const usable = candidates
-    .map((u) => ({ u, len: encodeLen(u) }))
+  const usable = variants
+    .map((v) => ({ ...v, u: bridgeUrl(origin, v.p), len: encodeLen(bridgeUrl(origin, v.p)) }))
     .filter((v) => v.len <= BRIDGE_URL_MAX_BYTES)
     .sort((a, b) => a.len - b.len);
-  return usable.length > 0 ? usable[0].u : text;
+  if (usable.length > 0) return { content: usable[0].u, ...usable[0].p };
+  // 回退为纯文本码:二维码里直接放原文,调用方仍可给出等价的内联载荷
+  return { content: text, ...bridgePayload(raw, false) };
 }
 
-function bridgeResponse(html: string): Response {
+function bridgeResponse(html: string, noStore = false): Response {
   return new Response(html, {
     headers: {
       'content-type': 'text/html; charset=utf-8',
-      'cache-control': 'public, max-age=300',
+      'cache-control': noStore ? 'no-store' : 'public, max-age=300',
+      vary: 'Accept',
     },
   });
 }
@@ -1943,7 +2020,10 @@ async function appendChannelItem(
     value = bytes;
   } else {
     const text = payload.text ?? '';
-    item.preview = text.length > CHANNEL_PREVIEW_CHARS ? text.slice(0, CHANNEL_PREVIEW_CHARS) + '…' : text;
+    // 按码点切,别把 emoji 的代理对劈成半个字符
+    const chars = Array.from(text);
+    item.preview =
+      chars.length > CHANNEL_PREVIEW_CHARS ? chars.slice(0, CHANNEL_PREVIEW_CHARS).join('') + '…' : text;
     value = text;
   }
 
@@ -2301,20 +2381,15 @@ export default {
       await env.TRANSFERS.delete('t:' + code);
       const text = new TextDecoder().decode(entry.value);
       const raw = new TextEncoder().encode(text);
-      let d: string;
-      let z = 0;
+      let payload = bridgePayload(raw, false);
       try {
         const deflated = await deflateRaw(raw);
-        if (deflated.length < raw.length) {
-          d = toBase64Url(deflated);
-          z = 1;
-        } else {
-          d = toBase64Url(raw);
-        }
+        if (deflated.length < raw.length) payload = bridgePayload(deflated, true);
       } catch {
-        d = toBase64Url(raw);
+        // 无 CompressionStream:用未压缩载荷
       }
-      return bridgeResponse(bridgeHtml({ d, z }));
+      // 取件即焚:页面内联着正文,不能被浏览器或中间缓存留 5 分钟
+      return bridgeResponse(bridgeHtml(payload), true);
     }
 
     // 频道 API:JSON 走 create/send,裸二进制 + x-channel-code 走文件发送
@@ -2359,8 +2434,8 @@ export default {
       if (body.action === 'send') {
         const sendCode = (body.code ?? '').trim().toUpperCase();
         if (!CHANNEL_CODE_RE.test(sendCode)) return errorJson('频道码无效', 400);
-        const text = (body.text ?? '').trim();
-        if (!text) return errorJson('内容不能为空', 400);
+        const text = body.text ?? '';
+        if (!text.trim()) return errorJson('内容不能为空', 400);
         if (new TextEncoder().encode(text).length > TRANSFER_MAX_BYTES) return errorJson('内容超过 32KB 上限', 400);
         // 文本走 Durable Object:同一个频道串行写入,并立刻广播给所有连接
         return appendViaRoom(env, sendCode, text, safeFrom(body.from));
@@ -2447,11 +2522,11 @@ export default {
         let text: string;
         try {
           const body = (await request.json()) as { text?: string };
-          text = (body.text ?? '').trim();
+          text = body.text ?? '';
         } catch {
           return errorJson('请求体须为 JSON', 400);
         }
-        if (!text) {
+        if (!text.trim()) {
           return errorJson('内容不能为空', 400);
         }
         if (new TextEncoder().encode(text).length > TRANSFER_MAX_BYTES) {
@@ -2489,8 +2564,8 @@ export default {
       });
     }
 
-    const text = (params.get('text') ?? '').trim();
-    if (!text) {
+    const text = params.get('text') ?? '';
+    if (!text.trim()) {
       return errorJson('参数 text 不能为空', 400);
     }
     // 静默截断会产出内容缺失的二维码(扫码结果与输入不符),因此超限直接拒绝
@@ -2503,13 +2578,22 @@ export default {
       ? (eccParam as (typeof ECC_LEVELS)[number])
       : 'M';
 
+    // 同一个 URL 有两种身份:浏览器打开要看到能复制/打开的分享页,<img src> 要拿到 SVG。
+    // 按 Accept 区分并显式声明 Vary,否则缓存会把两者混用 —— 这正是"复制的链接打开不对"的根因。
+    const wantsHtml =
+      (params.get('fmt') ?? '').toLowerCase() !== 'svg' &&
+      (request.headers.get('accept') ?? '').includes('text/html');
+
     try {
       // 默认走中转页(复制/打开由扫码者自选);mode=text 显式要求直出原文
-      const content =
+      const picked =
         (params.get('mode') ?? '').toLowerCase() === 'text'
-          ? text
+          ? { content: text, ...bridgePayload(new TextEncoder().encode(text), false) }
           : await bridgeContent(url.origin, text);
-      const svg = renderSVG(content, {
+      if (wantsHtml) {
+        return bridgeResponse(bridgeHtml(picked));
+      }
+      const svg = renderSVG(picked.content, {
         ecc,
         pixelSize: clampInt(params.get('size'), 1, 20, 8),
         border: clampInt(params.get('margin'), 0, 10, 2),
@@ -2521,6 +2605,7 @@ export default {
           'content-type': 'image/svg+xml; charset=utf-8',
           'cache-control': 'public, max-age=86400',
           'access-control-allow-origin': '*',
+          vary: 'Accept',
         },
       });
     } catch {

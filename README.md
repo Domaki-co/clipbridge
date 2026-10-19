@@ -40,7 +40,7 @@ Roll back a bad deploy with `npx wrangler rollback` (deployment history is kept 
 
 | Route | Method | Purpose |
 | --- | --- | --- |
-| `/` | GET | Home transfer and claim page; with `?text=` returns the SVG QR |
+| `/` | GET | Home transfer and claim page; with `?text=` returns the SVG QR, or the share page when a browser asks for HTML (see "QR generation") |
 | `/qr` | GET | Standalone QR generator page |
 | `/t?d=…` | GET | Bridge page where a scanned copy-code lands |
 | `/send` | GET | Claim-code sender page (byte-identical to `/`; kept for old links, not linked from the home footer) |
@@ -72,10 +72,13 @@ GET /?text=...&size=...&margin=...&color=...&bg=...&ecl=...
 | `bg` | same formats | `#ffffff` | Background color |
 | `ecl` | `L` / `M` / `Q` / `H` | `M` | Error-correction level: higher survives more occlusion but holds less data |
 | `mode` | `text` | bridge | `text` encodes the raw content directly; omit for the default bridge behavior (see "Copy bridge") |
+| `fmt` | `svg` | auto | Forces the image response. Without it, a request whose `Accept` includes `text/html` gets the share page instead — one URL, chosen by `Accept`, and both responses send `Vary: Accept` |
 
 Responses:
 
-- **Success** — `200`, `image/svg+xml`, with `Cache-Control: public, max-age=86400` and `Access-Control-Allow-Origin: *`
+- **Success (image)** — `200`, `image/svg+xml`, with `Cache-Control: public, max-age=86400`, `Access-Control-Allow-Origin: *` and `Vary: Accept`
+- **Success (share page)** — `200`, `text/html` when `Accept` includes `text/html` and `fmt` is not `svg`. Pasted into a browser the link shows the content with **复制全文** / **打开链接**; `<img src>` and `curl` (no `text/html` in `Accept`) still receive the SVG
+- **Content fidelity** — `text` is encoded as given: leading/trailing spaces, tabs and newlines are preserved, and only a whitespace-only value is rejected with `400`
 - **Bad request** — `400`, `application/json`, e.g. `{"error":"参数 text 不能为空"}` ("parameter `text` cannot be empty"; error bodies are in Chinese)
 - **No `text` param** — `200`, `text/html`, the built-in playground page
 
@@ -204,6 +207,8 @@ BASE=https://your-deployment.example.com npm test   # or point them at any live 
 ```
 
 ## Version
+
+**v1.4.0** (2026-10-19) — copy-link integrity. A link copied from `/qr` is `/?text=…`, which only ever answered with the QR image: pasted into a browser it showed a bare SVG (or an "can't open" in messengers), and a link that had lost characters in transit still decoded to a *shorter* text with no warning. Every bridge payload now carries an 8-hex FNV-1a checksum (`&c=`); the page verifies it before decoding and says **链接不完整(内容被截断或改动),请重新获取** instead of quietly trimming the text (`/r/:code` links get the same guard). The same URL now answers `Accept: text/html` with the share page (**复制全文** / **打开链接**) while `<img src>` and `curl` keep getting the SVG — `Vary: Accept` on both, `fmt=svg` forces the image. Claim pages send `cache-control: no-store` (they inline the body, so the old `max-age=300` contradicted burn-on-read). Submitted content is no longer trimmed front and back — only a whitespace-only value is rejected, so pasted log lines and code keep their indentation. The bridge page falls back to `execCommand('copy')` where `navigator.clipboard` is missing (non-secure contexts) and explains a missing payload, a checksum mismatch or a missing `DecompressionStream` instead of one generic error. Channel previews slice by code point (no half emoji) and a failed prefetch becomes a visible **载入中…** retry rather than a dead button.
 
 **v1.3.1** (2026-10-09) — tidier home page: the landing page already has both panels (paste text / pick a file to get a claim code, plus a claim-code box below), so its footer no longer repeats **发送页** and **独立取件页**. The `/send` and `/r` routes are untouched — old bookmarks, printed QR codes and the `README` instructions all still work.
 
